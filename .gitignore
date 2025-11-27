@@ -3,6 +3,8 @@
 /Datasets
 *.o*
 *.pt
+*.ckpt
+*.pth
 /logs/*.csv
 /logs/*.json
 /results
@@ -10,3 +12,5 @@
 *.png
 */wandb
 *.jpg
+*.pyc
+/__pychache__

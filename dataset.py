@@ -44,6 +44,7 @@ class MyDataset(Dataset):
         self.blank_prob = blank_prob
         self.transforms = get_transforms(2, image_size, downsample, upsample, t2w_offset)
             
+        print('\n', data_type)
         for i in self.transforms:
             print(i, self.transforms[i])
             

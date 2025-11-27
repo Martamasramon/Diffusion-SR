@@ -108,6 +108,16 @@ def plot_image(image, fig, axes, i, j, colorbar=True, std=False):
     # if colorbar:
     #     fig.colorbar(img_plot, ax=axes[i, j])
     
+def plot_error(pred, highres, fig, axes, i, j):
+    # Error
+    err = np.abs(format_image(pred[i]) - format_image(highres[i]))
+    p99 = np.percentile(err, 99.5)
+    den = p99 if p99 > 1e-8 else (err.max() + 1e-8)
+    err_norm = np.clip(err / den, 0, 1)
+
+    im_overlay = axes[i, j].imshow(err_norm, cmap='RdYlGn_r', vmin=0, vmax=1, alpha=0.6)
+    cbar = fig.colorbar(im_overlay, ax=axes[i, j])
+    
 def visualize_batch(diffusion, dataloader, batch_size, device, use_T2W=False, controlnet=False, output_name="test_image"):
     ncols = 5 if use_T2W else 4
     fig, axes = plt.subplots(nrows=batch_size, ncols=ncols, figsize=(3*ncols,3*batch_size))
@@ -161,14 +171,7 @@ def visualize_batch(diffusion, dataloader, batch_size, device, use_T2W=False, co
             else:
                 plot_image(t2w_input[0][i], fig, axes, i, 4)
 
-        # Error
-        err = np.abs(format_image(pred[i]) - format_image(highres[i]))
-        p99 = np.percentile(err, 99.5)
-        den = p99 if p99 > 1e-8 else (err.max() + 1e-8)
-        err_norm = np.clip(err / den, 0, 1)
-
-        im_overlay = axes[i, 2].imshow(err_norm, cmap='RdYlGn_r', vmin=0, vmax=1, alpha=0.6)
-        cbar = fig.colorbar(im_overlay, ax=axes[i, 2])
+        plot_error(pred, highres, fig, axes, i, 2)    
 
     fig.tight_layout(pad=0.25)
     save_path = os.path.join('./test_images', output_name+'.jpg')
