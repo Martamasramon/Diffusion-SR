@@ -18,7 +18,7 @@ sys.path.append('../')
 from trainer_class  import Trainer
 from dataset        import MyDataset
 from arguments      import args
-from init_wb        import get_wandb_obj
+from init_wandb     import get_wandb_obj
 
 folder = '/cluster/project7/backup_masramon/IQT/'
 os.environ['CUDA_VISIBLE_DEVICES']='0,1'
@@ -26,7 +26,7 @@ os.environ['CUDA_VISIBLE_DEVICES']='0,1'
 def main():
     accelerator = Accelerator(split_batches=True, mixed_precision='no')
     img_size = args.img_size if not args.upsample else args.img_size*args.down
-    
+
     model = UNet_Basic(
         dim             = img_size,
         dim_mults       = tuple(args.dim_mults),

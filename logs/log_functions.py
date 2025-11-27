@@ -93,7 +93,6 @@ def parse_config_block(path):
     return args
 
 
-# --- SAVE HELPERS ------------------------------------------------------------
 def save_metrics_csv(rows, csv_path):
     """
     rows: list of dicts from parse_log_metrics
@@ -105,6 +104,7 @@ def save_metrics_csv(rows, csv_path):
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
         writer.writerows(rows)
+        
 
 def save_config_json(args_dict, json_path):
     with open(json_path, "w") as f:

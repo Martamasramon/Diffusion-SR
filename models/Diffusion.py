@@ -28,7 +28,7 @@ class Diffusion(nn.Module):
         beta_schedule           = 'sigmoid', ## vs 'linear'
         schedule_fn_kwargs      = dict(),
         ddim_sampling_eta       = 0.,        ## vs 1.
-        auto_normalize          = True,
+        auto_normalize          = True,         # False for latent diffusion !!!
         offset_noise_strength   = 0.,    # https://www.crosslabs.org/blog/diffusion-with-offset-noise
         min_snr_loss_weight     = False, # https://arxiv.org/abs/2303.09556
         min_snr_gamma           = 5,
