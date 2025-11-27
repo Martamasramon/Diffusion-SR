@@ -33,3 +33,27 @@ def get_wandb_obj(args):
     )
 
     return run
+
+def get_wandb_obj_VAE(args):
+    date_str = datetime.now().strftime("%Y_%m_%d_%H_%M")
+    
+    run = wandb.init(
+        entity  =   "marta-masramon",
+        project =   "VAE",
+        name    =   f"{args.results_folder[2:]}_{date_str}",
+        config={
+            "name":             args.results_folder,
+            "image_size":       args.img_size,
+            "downsampling":     args.down, 
+            "initial_lr":       args.lr,
+            "epochs":           args.n_epochs,
+            "blank_prob":       args.blank_prob, 
+            "t2w_offset":       args.t2w_offset, 
+            "use_T2W":          args.use_T2W, 
+            "use_mask":         args.use_mask, 
+            "finetune":         args.finetune,    
+            "vae_type":         args.vae_type,     
+        },
+    )
+
+    return run
