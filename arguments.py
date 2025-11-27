@@ -11,6 +11,8 @@ parser.add_argument('--timesteps',          type=int,  default=1000)
 parser.add_argument('--sampling_timesteps', type=int,  default=150)
 parser.add_argument('--beta_schedule',      type=str,  default='linear')
 parser.add_argument('--perct_λ',            type=float,default=0.1)
+# VAE params
+parser.add_argument('--vae_type',           type=str,  default='kl-f4')
 # Training
 parser.add_argument('--results_folder',     type=str,  default='./results')
 parser.add_argument('--batch_size',         type=int,  default=16)
