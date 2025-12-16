@@ -16,12 +16,14 @@ from einops import rearrange, reduce
 from tqdm.auto import tqdm
 
 import sys
-sys.path.append('../module')
+sys.path.append('/models')
 from network_utils   import *
 from network_modules import *
-
+from VAE import encode_latent, decode_latent
+from Diffusion   import Losses
 from ema_pytorch import EMA
 from transforms import downsample_transform
+
 
 class Trainer(object):
     def __init__(
@@ -53,6 +55,8 @@ class Trainer(object):
         max_grad_norm               = 1.,
         save_best_and_latest_only   = False,
         wandb_run                   = None, 
+        vae                         = None,
+        image_loss_weights          = {'mse':1, 'ssim':0, 'perct': 0.01},
     ):
         super().__init__()
 
@@ -113,10 +117,21 @@ class Trainer(object):
         self.model, self.opt = self.accelerator.prepare(self.model, self.opt)
 
         if save_best_and_latest_only:
-            self.best_mse = 1
+            self.best_mse = 10000
 
         self.save_best_and_latest_only = save_best_and_latest_only
         self.run = wandb_run 
+        
+        # Prep VAE if latent diffusion
+        self.vae = accelerator.prepare(vae) if vae is not None else None
+        if self.vae is not None:
+            self.vae.eval()
+            for p in self.vae.parameters():
+                p.requires_grad = False
+            self.image_loss = Losses()
+            self.image_loss = self.accelerator.prepare(self.image_loss)
+                
+        self.image_loss_weights  = image_loss_weights
 
     @property
     def device(self):
@@ -166,17 +181,27 @@ class Trainer(object):
         else:
             self.model.eval()
             
-        total_loss, total_mse, total_percpt, total_ssim = 0.0, 0.0, 0.0, 0.0
+        total_loss   = 0
+        total_losses = {'mse': 0.0, 'perct':0.0, 'ssim':0.0}
+        if self.vae is not None:
+            total_losses['recon_mse'], total_losses['recon_perct'], total_losses['recon_ssim'] = 0.0, 0.0, 0.0
+        
         dataloader = self.train_dataloader if train else self.test_dataloader
 
         for _ in range(self.gradient_accumulate_every):
             data = next(dataloader)
             
+            if self.vae is not None:
+                data['Image_target'] = data['ADC_condition']
+                
             for key, value in data.items():
                 try:
                     data[key] = value.to(self.accelerator.device)
                 except:
                     data[key] = [i.to(self.accelerator.device) for i in value]
+                
+                if self.vae is not None and key in ['ADC_input','ADC_condition','ADC_target','T2W_condition']:
+                    data[key],_ = encode_latent(data[key], self.vae)
                      
             with self.accelerator.autocast():
                 control = data['T2W_condition'] if self.model.controlnet else None
@@ -187,24 +212,42 @@ class Trainer(object):
                 else:
                     defined_target, eval_transform = None, None
                 
+                losses = {}
                 if self.use_t2w_embed:
                     data['T2W_embed'] = [t.squeeze(1) for t in data['T2W_embed']]
-                    loss, mse, perct, ssim = self.model(data['ADC_input'], data['ADC_condition'], data['T2W_embed'], control, defined_target, eval_transform)
+                    prediction, loss, losses['mse'], losses['perct'], losses['ssim'], t = self.model(data['ADC_input'], data['ADC_condition'], data['T2W_embed'], control, defined_target, eval_transform)
                 else:
-                    loss, mse, perct, ssim = self.model(data['ADC_input'], data['ADC_condition'], t2w_in,            control,  defined_target, eval_transform)
+                    prediction, loss, losses['mse'], losses['perct'], losses['ssim'], t = self.model(data['ADC_input'], data['ADC_condition'], t2w_in,            control,  defined_target, eval_transform)
                 
-                total_loss   += loss.item()  / self.gradient_accumulate_every
-                total_mse    += mse.item()   / self.gradient_accumulate_every
-                total_percpt += perct.item() / self.gradient_accumulate_every
-                total_ssim   += ssim.item()  / self.gradient_accumulate_every
+                if self.vae is not None and self.image_loss_weights is not None:
+                    reconstruction = decode_latent(prediction, self.vae)[:, 0, :, :].unsqueeze(1) 
+                    img_target     = data['Image_target']                                         
 
+                    recon_mse      = self.image_loss.calc_mse(reconstruction, img_target)       
+                    recon_perct    = self.image_loss.calc_percept(reconstruction, img_target) 
+                    recon_ssim     = self.image_loss.calc_ssim(reconstruction, img_target)     
+
+                    losses['recon_mse']   = recon_mse.mean()
+                    losses['recon_perct'] = recon_perct
+                    losses['recon_ssim']  = recon_ssim
+
+                    # build per-sample recon loss for SNR weighting
+                    recon_loss = ( self.image_loss_weights['mse']   * recon_mse +
+                                self.image_loss_weights['perct'] * recon_perct +
+                                self.image_loss_weights['ssim']  * recon_ssim )   
+                    recon_loss *= extract(self.model.loss_weight, t, recon_loss.shape)          
+                    loss = loss + recon_loss.mean()
+                    
+                total_loss += loss.detach().item() / self.gradient_accumulate_every                        
+                for name, val in losses.items():
+                    if isinstance(val, torch.Tensor) and val.ndim > 0:
+                        val = val.mean()
+                    total_losses[name] += val.detach().item() / self.gradient_accumulate_every
+                    
             if train:
                 self.accelerator.backward(loss)
-                # for name, param in self.model.named_parameters():
-                #     if param.grad is None:
-                #         print(name)
                     
-        return data, total_loss, total_mse, total_percpt, total_ssim
+        return data, total_loss, total_losses
                     
     def sample_images(self, data):
         with torch.no_grad():
@@ -244,6 +287,9 @@ class Trainer(object):
         
         all_images = torch.cat(all_images_list, dim = 0)
         
+        if self.vae is not None:
+            all_images = decode_latent(all_images, self.vae)[:, 0, :, :].unsqueeze(1)
+        
         utils.save_image(all_images, str(self.results_folder / f'sample-{milestone}.png'), nrow = int(math.sqrt(self.num_samples)))
 
                 
@@ -254,8 +300,8 @@ class Trainer(object):
 
             while self.step < self.train_num_steps:
                 # Calculate loss
-                _,    total_loss_train, total_mse_train, total_percpt_train, total_ssim_train = self.calc_loss(train=True)
-                data, total_loss_test , total_mse_test , total_percpt_test , total_ssim_test  = self.calc_loss(train=False)
+                _,    total_loss_train, total_losses_train = self.calc_loss(train=True)
+                data, total_loss_val , total_losses_val    = self.calc_loss(train=False)
                 
                 accelerator.wait_for_everyone()
                 accelerator.clip_grad_norm_(self.trainable_params, self.max_grad_norm)
@@ -278,28 +324,28 @@ class Trainer(object):
                     if self.step != 0 and divisible_by(self.step, self.save_every):
                         milestone = self.step // self.save_every
                         if self.save_best_and_latest_only:
-                            if self.best_mse > total_mse_test:
-                                self.best_mse = total_mse_test
+                            val_mse = total_losses_val.get('mse', total_loss_val)
+                            if self.best_mse > val_mse:
+                                self.best_mse = val_mse
                                 self.save("best")
                             self.save("latest")
                         else:
                             self.save(milestone)
                 
                 if self.run is not None:
-                    self.run.log({
-                        "Train - total": total_loss_train,
-                        "Train - MSE": total_mse_train,
-                        "Train - perceptual": total_percpt_train,
-                        "Train - SSIM": total_ssim_train,
-                        "Test - total": total_loss_test,
-                        "Test - MSE": total_mse_test,
-                        "Test - perceptual": total_percpt_test,
-                        "Test - SSIM": total_ssim_test,
-                    })
+                    log_losses = {
+                        'Train - total': total_loss_train,
+                        'Val - total':   total_loss_val,
+                    }
+                    for key in total_losses_train:
+                        log_losses['Train - '+key] = total_losses_train[key]
+                        log_losses['Val - '+key]   = total_losses_val[key]
+                    self.run.log(log_losses)
+                    
                 # Update pbar
                 if self.step % 100 == 0:
-                    pbar.set_description(f"Train loss: {total_loss_train:.4f} (MSE: {total_mse_train:.4f},  perct: {total_percpt_train:.4f}, SSIM: {total_ssim_train:.4f},)\n"+
-                                         f"Test loss:  {total_loss_test:.4f} (MSE: {total_mse_test:.4f},  perct: {total_percpt_test:.4f}, SSIM: {total_ssim_test:.4f},)")
+                    pbar.set_description(f"Train loss: {total_loss_train:.4f} (MSE: {total_losses_train['mse']:.4f},  perct: {total_losses_train['perct']:.4f}, SSIM: {total_losses_train['ssim']:.4f},)\n"+
+                                         f"Test loss:  {total_loss_val:.4f} (MSE: {total_losses_val['mse']:.4f},  perct: {total_losses_val['perct']:.4f}, SSIM: {total_losses_val['ssim']:.4f},)")
                     pbar.update(100)
 
         accelerator.print('training complete')
