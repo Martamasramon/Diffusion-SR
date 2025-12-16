@@ -11,6 +11,7 @@ parser.add_argument('--timesteps',          type=int,  default=1000)
 parser.add_argument('--sampling_timesteps', type=int,  default=150)
 parser.add_argument('--beta_schedule',      type=str,  default='linear')
 parser.add_argument('--perct_λ',            type=float,default=0.1)
+parser.add_argument('--objective',          type=str,  default='pred_v')
 # Image recon for latent diffusion
 parser.add_argument('--recon_mse',          type=float,default=0.)
 parser.add_argument('--recon_ssim',         type=float,default=0.)
