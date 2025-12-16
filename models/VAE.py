@@ -2,19 +2,23 @@ import torch
 from ldm.models.autoencoder import AutoencoderKL 
 from torch.nn.functional import mse_loss
 import yaml
-
+import matplotlib.pyplot as plt
+import os
 import sys
 sys.path.append('../')
-from test_functions  import plot_image, format_image, plot_error
 
-def read_config(folder):
-    with open(f"/cluster/project7/ProsRegNet_CellCount/CriDiff/autoencoder/pretrained/{folder}/config.yaml", 'r') as file:
+folder_autoencoder = "/cluster/project7/ProsRegNet_CellCount/CriDiff/autoencoder"
+
+def read_config(folder, greyscale):
+    grey ='_grey' if greyscale else ''
+    
+    with open(f"{folder_autoencoder}/pretrained/{folder}/config{grey}.yaml", 'r') as file:
         config = yaml.safe_load(file)
         
     return config['model']['params']
 
-def build_adc_vae(folder):
-    config   = read_config(folder)
+def build_adc_vae(folder, greyscale):
+    config   = read_config(folder, greyscale)
     ddconfig = config['ddconfig']
 
     vae = AutoencoderKL(
@@ -25,19 +29,13 @@ def build_adc_vae(folder):
     )
     return vae
 
-def input_to_shape(x, greyscale):
-    x = x * 2.0 - 1.0  # dataset gives [0,1]; AutoencoderKL expects [-1,1]
-    if not greyscale: 
-        x = x.repeat(1, 3, 1, 1) # Expects RGB
-    return x
-
 def load_vae(ckpt_folder, greyscale=False, ckpt_path=None):
-    vae  = build_adc_vae(ckpt_folder)
+    vae  = build_adc_vae(ckpt_folder, greyscale)
     
     if ckpt_path is None:
-        ckpt = torch.load(f"./pretrained/{ckpt_folder}/model.ckpt", map_location="cpu", weights_only=False)
+        ckpt = torch.load(f"{folder_autoencoder}/pretrained/{ckpt_folder}/model.ckpt", map_location="cpu", weights_only=False)
     else:
-        ckpt = torch.load(f"./{ckpt_path}.ckpt", map_location="cpu", weights_only=False)
+        ckpt = torch.load(f"{folder_autoencoder}/{ckpt_path}.ckpt", map_location="cpu", weights_only=False)
     sd   = ckpt.get("state_dict", ckpt)
     
     if greyscale:
@@ -69,6 +67,36 @@ def adapt_to_gray(vae, sd):
 
     return sd_new
 
+SCALE = 0.13025
+
+def input_to_shape(x, greyscale):
+    x = x * 2.0 - 1.0  # dataset gives [0,1]; AutoencoderKL expects [-1,1]
+    if not greyscale: 
+        x = x.repeat(1, 3, 1, 1) # Expects RGB
+    return x
+
+def deterministic_vae(x, vae):
+    posterior = vae.encode(x)
+    z = posterior.mode()
+    return z, posterior
+
+def stochastic_vae(x, vae):
+    posterior = vae.encode(x)
+    z = posterior.sample()
+    return z, posterior
+
+def encode_latent(x, vae):
+    x = input_to_shape(x, False)
+    with torch.no_grad():
+        z, posterior = deterministic_vae(x,vae)
+    return z * SCALE, posterior
+
+def decode_latent(z, vae):
+    with torch.no_grad():
+        x = vae.decode(z / SCALE)
+    x = (x + 1.0) / 2.0 
+    return x
+
 def train_step(vae, train_loader, accelerator, optimizer, greyscale=False, kl_weight = 1e-6):
     vae.train()
     train_rec = 0.0
@@ -79,11 +107,10 @@ def train_step(vae, train_loader, accelerator, optimizer, greyscale=False, kl_we
     for batch in train_loader:
         x = batch.get("T2W_condition", batch["ADC_input"])  # (B, 1, H, W) from your transforms
         x = x.to(accelerator.device)
-        x = input_to_shape(x, greyscale)   
-            
-        posterior = vae.encode(x)
-        z = posterior.sample()
-        x_recon = vae.decode(z)
+        x = input_to_shape(x, greyscale)  
+          
+        z, posterior = stochastic_vae(x, vae)
+        x_recon = decode_latent(z, vae)
 
         rec_loss = mse_loss(x_recon, x)
         kl_loss  = posterior.kl().mean() # posterior.kl() returns per-pixel; mean over batch
@@ -118,10 +145,8 @@ def val_step(vae, val_loader, accelerator, greyscale=False, kl_weight = 1e-6):
         for batch in val_loader:
             x = batch.get("T2W_condition", batch["ADC_input"])
             x = x.to(accelerator.device)
-            x = input_to_shape(x, greyscale)
             
-            posterior = vae.encode(x)
-            z = posterior.sample()
+            z, posterior = encode_latent(x, vae)
             x_recon = vae.decode(z)
 
             rec_loss = mse_loss(x_recon, x)
@@ -140,34 +165,3 @@ def val_step(vae, val_loader, accelerator, greyscale=False, kl_weight = 1e-6):
 
     print(f"Test loss: {total_loss:.4e} (rec={val_rec:.4e}, kl={val_kl:.4e}) ")
     return total_loss, val_rec, val_kl
-
-    
-def visualize_batch(vae, dataloader, accelerator, output_name, greyscale=False):
-    batch = next(iter(dataloader))
-    x = batch.get("T2W_condition", batch["ADC_input"])
-    x = x.to(accelerator.device)
-    x = input_to_shape(x, greyscale)
-    batch_size = x.size(0)
-    
-    ncols = 3
-    fig, axes = plt.subplots(nrows=batch_size, ncols=ncols, figsize=(3*ncols,3*batch_size))
-    axes[0,0].set_title('Input')
-    axes[0,1].set_title('Output')
-    axes[0,2].set_title('Error')
-    
-    with torch.no_grad():
-        posterior = vae.encode(x)
-        z = posterior.sample()
-        x_recon = vae.decode(z)
-
-    for i in range(batch_size):
-        plot_image(x[i],       fig, axes, i, 0)
-        plot_image(x_recon[i], fig, axes, i, 1)
-        plot_image(x_recon[i], fig, axes, i, 2, False)
-        plot_error(x_recon, x, fig, axes, i, 2)
-
-    fig.tight_layout(pad=0.25)
-    save_path = os.path.join('./test_images', output_name+'.jpg')
-    plt.savefig(save_path)
-    plt.close()
-    print(f"Saved visualization to {save_path}")
