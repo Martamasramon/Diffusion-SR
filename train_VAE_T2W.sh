@@ -19,11 +19,12 @@ source /cluster/project7/ProsRegNet_CellCount/CriDiff/CriDiff_env/bin/activate
 export PATH="/cluster/project7/ProsRegNet_CellCount/CriDiff/CriDiff_env/bin:$PATH"
 
 python3 train.py \
-    --results_folder './T2W_VAE_grey' \
-    --lr 0.00001 \
-    --n_epochs 300 \
-    --batch_size 32 \
+    --results_folder './T2W_grey_smallLR' \
+    --lr 0.00000001 \
+    --n_epochs 100 \
+    --batch_size 64 \
     --save_every 50 \
-    --use_T2W 
+    --use_T2W \
+    --greyscale
 
 date
