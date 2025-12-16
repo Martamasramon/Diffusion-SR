@@ -11,8 +11,15 @@ parser.add_argument('--timesteps',          type=int,  default=1000)
 parser.add_argument('--sampling_timesteps', type=int,  default=150)
 parser.add_argument('--beta_schedule',      type=str,  default='linear')
 parser.add_argument('--perct_λ',            type=float,default=0.1)
+# Image recon for latent diffusion
+parser.add_argument('--recon_mse',          type=float,default=0.)
+parser.add_argument('--recon_ssim',         type=float,default=0.)
+parser.add_argument('--recon_perct',        type=float,default=0.)
 # VAE params
 parser.add_argument('--vae_type',           type=str,  default='kl-f4')
+parser.add_argument('--latent_size',        type=int,  default=16)
+parser.add_argument('--greyscale',          action='store_true')
+parser.set_defaults(greyscale = False)
 # Training
 parser.add_argument('--results_folder',     type=str,  default='./results')
 parser.add_argument('--batch_size',         type=int,  default=16)
