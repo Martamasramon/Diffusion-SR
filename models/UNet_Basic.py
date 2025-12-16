@@ -17,6 +17,7 @@ class UNet_Basic(nn.Module):
         with_time_emb   = True,
         controlnet      = False,
         concat_t2w      = False,
+        img_channels    = 1
     ):
         super().__init__()
         
@@ -26,12 +27,11 @@ class UNet_Basic(nn.Module):
         self.self_condition     = self_condition
         self.with_time_emb      = with_time_emb
 
-        self.input_img_channels = 1
-        # self.channels = self.input_img_channels
-        self.mask_channels      = 1
-        cond_channels           = 1  # conditioning image
-        self_cond_channels      = 1 if self_condition else 0
-        t2w_channels            = 1 if concat_t2w else 0 
+        self.input_img_channels = img_channels
+        self.mask_channels      = self.input_img_channels
+        cond_channels           = self.input_img_channels
+        self_cond_channels      = self.input_img_channels if self_condition else 0
+        t2w_channels            = self.input_img_channels if concat_t2w else 0 
         input_channels          = self.mask_channels + cond_channels + self_cond_channels + t2w_channels
         self.controlnet         = ControlNet(dim, dim_mults, 1, input_channels, with_time_emb) if controlnet else None
         self.concat_t2w         = concat_t2w
