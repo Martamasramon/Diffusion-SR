@@ -21,7 +21,6 @@ from arguments      import args
 from init_wandb     import get_wandb_obj
 
 folder = '/cluster/project7/backup_masramon/IQT/'
-os.environ['CUDA_VISIBLE_DEVICES']='0,1'
 
 def main():
     accelerator = Accelerator(split_batches=True, mixed_precision='no')

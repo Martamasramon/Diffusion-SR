@@ -43,7 +43,7 @@ def main():
         beta_schedule       = args.beta_schedule,
         loss_weights        = {'mse':1, 'ssim':0, 'perct':0},
         auto_normalize      = False,
-        objective           = 'pred_noise'
+        objective           = args.objective
     )
     
     if args.checkpoint:

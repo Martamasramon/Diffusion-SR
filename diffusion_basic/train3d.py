@@ -19,7 +19,6 @@ from dataset        import MyDataset3D
 from arguments      import args
 
 folder = '/cluster/project7/backup_masramon/PI-CAI/'
-os.environ['CUDA_VISIBLE_DEVICES']='0,1'
 
 def main():
     accelerator = Accelerator(split_batches=True, mixed_precision='no')

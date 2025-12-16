@@ -20,7 +20,6 @@ from dataset        import MyDataset
 from arguments     import args
 
 folder = '/cluster/project7/backup_masramon/IQT/'
-os.environ['CUDA_VISIBLE_DEVICES']='0,1'
 
 def main():
     assert args.use_T2W or args.use_histo == True

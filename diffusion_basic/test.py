@@ -19,7 +19,6 @@ from test_functions  import *
 from arguments       import args
 
 folder = '/cluster/project7/backup_masramon/IQT/'
-os.environ['CUDA_VISIBLE_DEVICES']='0,1'
  
 def main():
     assert torch.cuda.is_available(), "CUDA not available!"
