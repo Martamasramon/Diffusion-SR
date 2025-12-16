@@ -17,7 +17,7 @@ from test_functions  import *
 
 folder = '/cluster/project7/backup_masramon/IQT/'
 
-os.environ['CUDA_VISIBLE_DEVICES']='0,1'
+
 parser = argparse.ArgumentParser("Diffusion")
 
 parser.add_argument('--img_size',           type=int,  default=64)

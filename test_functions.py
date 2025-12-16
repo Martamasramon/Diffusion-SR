@@ -13,6 +13,8 @@ from PIL import Image
 import sys
 sys.path.append('../models')
 from models.network_utils import *
+from VAE import encode_latent, decode_latent
+
 
 def compute_metrics(pred, gt):
     pred_np = pred.squeeze().cpu().numpy()
@@ -93,8 +95,7 @@ def evaluate_results(diffusion, dataloader, device, batch_size, use_T2W=False, c
 def format_image(tensor):
     # Convert from torch tensor [1, H, W] -> [H, W], ensure it's on CPU and numpy
     return tensor.squeeze().detach().cpu().numpy()
-
-
+    
 def plot_image(image, fig, axes, i, j, colorbar=True, std=False):
     try:
         image  = format_image(image)
@@ -110,7 +111,7 @@ def plot_image(image, fig, axes, i, j, colorbar=True, std=False):
     
 def plot_error(pred, highres, fig, axes, i, j):
     # Error
-    err = np.abs(format_image(pred[i]) - format_image(highres[i]))
+    err = np.abs(format_image(pred) - format_image(highres))
     p99 = np.percentile(err, 99.5)
     den = p99 if p99 > 1e-8 else (err.max() + 1e-8)
     err_norm = np.clip(err / den, 0, 1)
@@ -118,7 +119,7 @@ def plot_error(pred, highres, fig, axes, i, j):
     im_overlay = axes[i, j].imshow(err_norm, cmap='RdYlGn_r', vmin=0, vmax=1, alpha=0.6)
     cbar = fig.colorbar(im_overlay, ax=axes[i, j])
     
-def visualize_batch(diffusion, dataloader, batch_size, device, use_T2W=False, controlnet=False, output_name="test_image"):
+def visualize_batch(diffusion, dataloader, batch_size, device, use_T2W=False, controlnet=False, output_name="test_image", vae=None):
     ncols = 5 if use_T2W else 4
     fig, axes = plt.subplots(nrows=batch_size, ncols=ncols, figsize=(3*ncols,3*batch_size))
     axes[0,0].set_title('Low res (Input)')
@@ -133,6 +134,9 @@ def visualize_batch(diffusion, dataloader, batch_size, device, use_T2W=False, co
     highres = batch['ADC_input'].to(device)
     lowres  = batch['ADC_condition'].to(device)
     
+    if vae is not None:
+        lowres, _ = encode_latent(lowres, vae)
+    
     if diffusion is not None:
         if use_T2W:
             try:
@@ -142,6 +146,9 @@ def visualize_batch(diffusion, dataloader, batch_size, device, use_T2W=False, co
             except:
                 t2w_input = batch['T2W_condition'].to(device)
                 t2w_image = True
+                
+            if vae is not None:
+                t2w_input,_ = encode_latent(t2w_input, vae)
 
             with torch.no_grad():
                 if controlnet:
@@ -151,14 +158,22 @@ def visualize_batch(diffusion, dataloader, batch_size, device, use_T2W=False, co
         else:
             with torch.no_grad():
                 pred  = diffusion.sample(lowres, batch_size=lowres.shape[0])
-    else:
-        lowres    = batch['ADC_condition']
-        full_size = lowres.shape[-1]
-        for i in range(batch_size):
-            lowres[i] = cv2.resize(lowres[i], (full_size//2,full_size//2))
-            lowres[i] = cv2.resize(lowres[i], (full_size,full_size), interpolation=cv2.INTER_LINEAR)
-        lowres    = lowres.to(device)
-
+    # else:
+    #     lowres    = batch['ADC_condition']
+    #     full_size = lowres.shape[-1]
+    #     for i in range(batch_size):
+    #         lowres[i] = cv2.resize(lowres[i], (full_size//2,full_size//2))
+    #         lowres[i] = cv2.resize(lowres[i], (full_size,full_size), interpolation=cv2.INTER_LINEAR)
+    #     lowres    = lowres.to(device)
+        
+    if vae is not None:
+        pred   = decode_latent(pred, vae) if diffusion is not None else decode_latent(lowres, vae)
+        pred   = pred[:,0,:,:]
+        lowres = batch['ADC_condition'].to(device)
+        
+    print("orig min/max:", torch.min(lowres),torch.max(lowres))
+    print("rec  min/max:", torch.min(pred),torch.max(pred))
+    
     for i in range(batch_size):
         # Plot images
         plot_image(lowres[i],  fig, axes, i, 0)
@@ -167,11 +182,13 @@ def visualize_batch(diffusion, dataloader, batch_size, device, use_T2W=False, co
         plot_image(highres[i], fig, axes, i, 3)
         if use_T2W:
             if t2w_image:
+                if vae is not None:
+                    t2w_input   = decode_latent(t2w_input, vae)[:,0,:,:]
                 plot_image(t2w_input[i], fig, axes, i, 4)
             else:
                 plot_image(t2w_input[0][i], fig, axes, i, 4)
 
-        plot_error(pred, highres, fig, axes, i, 2)    
+        plot_error(pred[i], highres[i], fig, axes, i, 2)    
 
     fig.tight_layout(pad=0.25)
     save_path = os.path.join('./test_images', output_name+'.jpg')
@@ -201,11 +218,16 @@ def visualize_variability(diffusion, dataloader, batch_size, device, use_T2W=Fal
     highres = batch['ADC_input'].to(device)
     lowres  = batch['ADC_condition'].to(device)
     
+    if vae is not None:
+        low_res,_ = encode_latent(lowres, vae)
+    
     all_pred = []
     for rep in range(num_rep):
         if use_T2W:
             # Ignoring embedding for injection models
             t2w_input = batch['T2W_condition'].to(device)
+            if vae is not None:
+                t2w_input,_ = encode_latent(t2w_input, vae)
             with torch.no_grad():
                 if controlnet:
                     pred  = diffusion.sample(lowres, batch_size=lowres.shape[0], control=t2w_input)
@@ -304,3 +326,43 @@ def visualize_variability_t2w(diffusion, dataloader, batch_size, device, control
     print(f"Saved visualization to {save_path}")
 
  
+def plot_image_vae(image, fig, axes, i, j, colorbar=True, std=False):
+    try:
+        image  = format_image(image)
+    except:
+        pass
+       
+    img_plot = axes[i, j].imshow(image,  cmap='gray', vmin=-1, vmax=1)                      
+    axes[i, j].axis('off')
+    
+def visualize_batch_vae(vae, dataloader, accelerator, output_name, greyscale=False):
+    batch = next(iter(dataloader))
+    x = batch.get("T2W_condition", batch["ADC_input"])
+    x = x.to(accelerator.device)
+    x = input_to_shape(x, greyscale)
+    batch_size = x.size(0)
+    
+    ncols = 2#5
+    fig, axes = plt.subplots(nrows=batch_size, ncols=ncols, figsize=(3*ncols,3*batch_size))
+    axes[0,0].set_title('Input')
+    axes[0,1].set_title('Output 0')
+    # axes[0,2].set_title('Output 1')
+    # axes[0,3].set_title('Output 2')
+    # axes[0,2].set_title('Error')
+    
+    z, posterior = encode_latent(x, vae)
+    x_recon = vae.decode(z)
+
+    for i in range(batch_size):
+        plot_image_vae(x[i][0],       fig, axes, i, 0)
+        plot_image_vae(x_recon[i][0], fig, axes, i, 1)
+        # plot_image(x_recon[i][1], fig, axes, i, 2)
+        # plot_image(x_recon[i][2], fig, axes, i, 3)
+        # plot_image(x_recon[i][0], fig, axes, i, 2, False)
+        # plot_error(x_recon[i][0], x[i][0], fig, axes, i, 2)
+
+    fig.tight_layout(pad=0.25)
+    save_path = os.path.join('./test_images', output_name+'.jpg')
+    plt.savefig(save_path)
+    plt.close()
+    print(f"Saved visualization to {save_path}")
