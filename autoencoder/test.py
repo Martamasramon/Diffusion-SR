@@ -12,16 +12,17 @@ from test_functions  import *
 
 import sys
 sys.path.append('../models')
-from VAE import build_adc_vae, load_vae, visualize_batch, val_step
+from VAE import build_adc_vae, load_vae, val_step
 
  
 def main():
-    accelerator = Accelerator(split_batches=True, mixed_precision='no')
+    assert torch.cuda.is_available(), "CUDA not available!"
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     folder = '/cluster/project7/backup_masramon/IQT/'
     test_dataset = MyDataset(
         folder,
-        data_type       = 'train',
+        data_type       = 'val',
         image_size      = args.img_size,    
         use_mask        = args.use_mask,
         downsample      = args.down,
@@ -32,16 +33,15 @@ def main():
     test_loader = DataLoader(test_dataset,  batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True)
 
     # Build VAE
-    greyscale = True
-    vae = load_vae(args.vae_type, greyscale, args.checkpoint)
-    
+    vae = load_vae(args.vae_type, args.greyscale, args.checkpoint)
+    vae.to(device)
+
     # Visualise & evaluate results
     print('Visualizing...') 
-    output_name = args.checkpoint
-    visualize_batch(vae, test_loader, accelerator, output_name, greyscale=False)
+    visualize_batch(None, test_loader, args.batch_size, device, output_name=args.save_name, vae=vae)
     
-    print('Evaluating...')    
-    _,_,_ = val_step (vae, test_loader, accelerator, greyscale )
+    # print('Evaluating...')    
+    # _,_,_ = val_step (vae, test_loader, accelerator, args.greyscale )
 
     
 if __name__ == '__main__':

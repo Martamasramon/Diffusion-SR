@@ -12,7 +12,7 @@ from init_wandb import get_wandb_obj_VAE
 
 import sys
 sys.path.append('../models')
-from VAE import build_adc_vae, load_vae, train_step, val_step
+from VAE import load_vae, train_step, val_step
 
 def main():
     accelerator = Accelerator(split_batches=True, mixed_precision='no')
@@ -46,8 +46,7 @@ def main():
     run = get_wandb_obj_VAE(args)
     
     # Build VAE
-    greyscale = True
-    vae = load_vae(args.vae_type, greyscale)
+    vae = load_vae(args.vae_type, args.greyscale)
     
     optimizer = torch.optim.Adam(vae.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -68,8 +67,8 @@ def main():
     best_val_loss = 1000000000
     for epoch in range(1, n_epochs+1):
         print(f"[Epoch {epoch}/{n_epochs}] ")
-        train_loss, train_rec, train_kl = train_step(vae, train_loader, accelerator, optimizer, greyscale)
-        val_loss,   val_rec,   val_kl   = val_step  (vae, val_loader, accelerator, greyscale )
+        train_loss, train_rec, train_kl = train_step(vae, train_loader, accelerator, optimizer, args.greyscale)
+        val_loss,   val_rec,   val_kl   = val_step  (vae, val_loader, accelerator, args.greyscale )
         
         run.log({
             "train_total":  train_loss,
