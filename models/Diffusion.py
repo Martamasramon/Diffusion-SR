@@ -16,6 +16,29 @@ from network_modules import *
 
 ModelPrediction =  namedtuple('ModelPrediction', ['pred_noise', 'x_start'])
 
+class Losses(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.perct_loss = VGGPerceptualLoss()
+        
+    def calc_mse(self, x_pred, x_target):
+        loss = F.mse_loss(x_pred, x_target, reduction = 'none')
+        loss = reduce(loss, 'b ... -> b', 'mean')
+        return loss
+    
+    def calc_percept(self, x_pred, x_target):
+        predicted = x_pred.clamp(0.0, 1.0)
+        target    = x_target.clamp(0.0, 1.0)
+        loss = self.perct_loss(predicted, target)
+        return loss
+    
+    def calc_ssim(self, x_pred, x_target):
+        predicted = x_pred.clamp(0.0, 1.0)
+        target    = x_target.clamp(0.0, 1.0)
+        val       = ssim(predicted, target, data_range=1.0)
+        return 1.0 - val
+        
+    
 class Diffusion(nn.Module):
     def __init__(
         self,
@@ -29,10 +52,8 @@ class Diffusion(nn.Module):
         schedule_fn_kwargs      = dict(),
         ddim_sampling_eta       = 0.,        ## vs 1.
         auto_normalize          = True,         # False for latent diffusion !!!
-        offset_noise_strength   = 0.,    # https://www.crosslabs.org/blog/diffusion-with-offset-noise
-        min_snr_loss_weight     = False, # https://arxiv.org/abs/2303.09556
         min_snr_gamma           = 5,
-        perct_λ                 = 0.01
+        loss_weights            = {'mse':1, 'ssim':0, 'perct':0},
     ):
         super().__init__()
 
@@ -99,28 +120,22 @@ class Diffusion(nn.Module):
         register_buffer('posterior_mean_coef1',             betas * torch.sqrt(alphas_cumprod_prev) / (1. - alphas_cumprod))
         register_buffer('posterior_mean_coef2',             (1. - alphas_cumprod_prev) * torch.sqrt(alphas) / (1. - alphas_cumprod))
 
-        self.offset_noise_strength = offset_noise_strength   # In blogpost, they claimed 0.1 was ideal
-
         # derive loss weight https://arxiv.org/abs/2303.09556
         snr = alphas_cumprod / (1 - alphas_cumprod)
 
-        maybe_clipped_snr = snr.clone()
-        if min_snr_loss_weight:
-            maybe_clipped_snr.clamp_(max = min_snr_gamma)
-
         if objective == 'pred_noise':
-            register_buffer('loss_weight', maybe_clipped_snr / snr)
+            register_buffer('loss_weight', torch.ones_like(snr))
         elif objective == 'pred_x0':
-            register_buffer('loss_weight', maybe_clipped_snr)
+            register_buffer('loss_weight', snr)
         elif objective == 'pred_v':
-            register_buffer('loss_weight', maybe_clipped_snr / (snr + 1))
+            register_buffer('loss_weight', snr / (snr + 1))
 
         # auto-normalization of data [0, 1] -> [-1, 1] - can turn off by setting it to be False
         self.normalize      = normalize_to_neg_one_to_one if auto_normalize else identity
         self.unnormalize    = unnormalize_to_zero_to_one  if auto_normalize else identity
         
-        self.perct_loss     = VGGPerceptualLoss()
-        self.perct_λ        = perct_λ
+        self.loss           = Losses()
+        self.loss_weights   = loss_weights
 
     @property
     def device(self):
@@ -278,8 +293,7 @@ class Diffusion(nn.Module):
 
         return (extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start +
                 extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise)
-
-
+        
     def p_losses(self, 
                 x_start, 
                 low_res, 
@@ -289,16 +303,9 @@ class Diffusion(nn.Module):
                 defined_target,             
                 eval_transform,
                 noise   = None, 
-                offset_noise_strength = None,
-                 
         ):
         b, c, h, w              = x_start.shape
         noise                   = default(noise, lambda: torch.randn_like(x_start))
-        offset_noise_strength   = default(offset_noise_strength, self.offset_noise_strength)         # offset noise - https://www.crosslabs.org/blog/diffusion-with-offset-noise
-
-        if offset_noise_strength > 0.:
-            offset_noise = torch.randn(x_start.shape[:2], device = self.device)
-            noise += offset_noise_strength * rearrange(offset_noise, 'b c -> b c 1 1')
            
         x = self.q_sample(x_start = x_start, t = t, noise = noise)
 
@@ -311,36 +318,33 @@ class Diffusion(nn.Module):
                 x_self_cond.detach_()
 
         # predict and take gradient step
-        model_out = self.model(x, low_res, t, x_self_cond, control=control, t2w=t2w)
+        prediction   = self.model(x, low_res, t, x_self_cond, control=control, t2w=t2w)
+        x_start_pred = self.model_predictions(x, low_res, t, x_self_cond=x_self_cond, control=control, t2w=t2w).x_start   # predicted clean latent
 
         if self.objective == 'pred_noise':
             target = noise  
         elif self.objective == 'pred_x0':
-            target = x_start  # Predict high-res directly
+            target = x_start  
         elif self.objective == 'pred_v':
             target = self.predict_v(x_start, t, noise)
         else:
             raise ValueError(f'unknown objective {self.objective}')
+                    
+        norm_pred   = self.unnormalize(prediction) if eval_transform is None else eval_transform(self.unnormalize(prediction)) 
+        norm_target = self.unnormalize(target)    if eval_transform is None else defined_target                            
             
-        mse_loss = F.mse_loss(model_out, target, reduction = 'none')
-        mse_loss = reduce(mse_loss, 'b ... -> b', 'mean')
-        
-        x_out = self.unnormalize(model_out) 
-        if eval_transform is not None:                                    
-            x_out     = eval_transform(x_out)                               
-            x_target  = defined_target       
-        else:
-            x_target  = self.unnormalize(target)  
-         
-        perct_loss  = self.perct_loss(x_out.clamp(0.0, 1.0), x_target.clamp(0.0, 1.0))
-        
-        with torch.no_grad():
-            ssim_val   = ssim(x_out.clamp(0.0, 1.0), x_target.clamp(0.0, 1.0), data_range=1.0)
-        
-        loss = mse_loss + self.perct_λ * perct_loss
-        loss = loss * extract(self.loss_weight, t, loss.shape)
+        # mse loss before normalising, perceptual and ssim after normalising
+        mse_loss    = self.loss.calc_mse(prediction, target)
+        perct_loss  = self.loss.calc_percept(norm_pred, norm_target)
+        ssim_loss   = self.loss.calc_ssim(norm_pred, norm_target)
 
-        return loss.mean(), mse_loss.mean(), perct_loss.mean(), ssim_val.mean()
+        loss = (self.loss_weights['mse']   * mse_loss   + 
+                self.loss_weights['perct'] * perct_loss + 
+                self.loss_weights['ssim']  * ssim_loss )
+        loss *= extract(self.loss_weight, t, loss.shape)
+        # Maybe try loss = mse_loss.mean()
+
+        return self.unnormalize(x_start_pred), loss.mean(), mse_loss, perct_loss, ssim_loss, t
 
 
     def forward(self, 
