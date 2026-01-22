@@ -36,19 +36,14 @@ class UNet_Basic(nn.Module):
         self.controlnet         = ControlNet(dim, dim_mults, 1, input_channels, with_time_emb) if controlnet else None
         self.concat_t2w         = concat_t2w
 
-        dims_mask        = [dim, *map(lambda m: dim * m, dim_mults)]
-        self.in_out_mask = list(zip(dims_mask[:-1], dims_mask[1:]))
+        dims             = [dim, *map(lambda m: dim * m, dim_mults)]
+        self.in_out = list(zip(dims[:-1], dims[1:]))
         self.block_klass = partial(ResnetBlock, groups = 8)
 
         # time embedding 
         if with_time_emb:
             self.time_dim = dim
-            self.time_mlp = nn.Sequential(
-                SinusoidalPosEmb(dim),
-                nn.Linear(dim, dim * 4),
-                nn.GELU(),
-                nn.Linear(dim * 4, dim)
-            )
+            self.time_mlp = make_time_mlp(dim)
         else:
             self.time_dim = None
             self.time_mlp = None
@@ -57,10 +52,10 @@ class UNet_Basic(nn.Module):
         self.downs_label_noise  = nn.ModuleList([])
         self.ups                = nn.ModuleList([])
 
-        self.num_resolutions = len(self.in_out_mask)
+        self.num_resolutions = len(self.in_out)
 
         # ---- DOWN ---- #
-        for ind, (dim_in, dim_out) in enumerate(self.in_out_mask):
+        for ind, (dim_in, dim_out) in enumerate(self.in_out):
             is_last = ind >= (self.num_resolutions - 1)
 
             self.downs_label_noise.append(nn.ModuleList([
@@ -71,14 +66,14 @@ class UNet_Basic(nn.Module):
             ]))
 
         # ---- MID ---- #
-        mid_dim = dims_mask[-1]
+        mid_dim = dims[-1]
         
         self.mid_block1     = self.block_klass(mid_dim, mid_dim, time_emb_dim = self.time_dim)
         self.mid_attn       = Residual(PreNorm(mid_dim, LinearCrossAttention(mid_dim)))
         self.mid_block2     = self.block_klass(mid_dim, mid_dim, time_emb_dim = self.time_dim)
 
         # ---- UP ---- #
-        for ind, (dim_in, dim_out) in enumerate(reversed(self.in_out_mask)):
+        for ind, (dim_in, dim_out) in enumerate(reversed(self.in_out)):
             is_last = ind >= (self.num_resolutions - 1)
             
             self.ups.append(nn.ModuleList([
