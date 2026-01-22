@@ -1,0 +1,30 @@
+Monitoring started on: ernie
+--------------------------------------------------------
+Timestamp           | %CPU    | Memory (GB)  | GPU Usage
+--------------------------------------------------------
+2025-12-16 17:24:48 | 5       | 0.03        
+2025-12-16 17:25:49 | 52      | 1.85         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:  26% | Processes:  1
+2025-12-16 17:26:49 | 48.3    | 1.85         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:  49% | Processes:  1
+2025-12-16 17:27:50 | 48.7    | 1.85         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:  48% | Processes:  1
+2025-12-16 17:28:51 | 49.9    | 1.85         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:  61% | Processes:  1
+2025-12-16 17:29:52 | 50.7    | 1.85         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:  48% | Processes:  1
+2025-12-16 17:30:52 | 52.3    | 1.85         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:  60% | Processes:  1
+2025-12-16 17:31:53 | 54.2    | 1.85         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:  65% | Processes:  1
+2025-12-16 17:32:54 | 55.9    | 1.85         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:  63% | Processes:  1
+2025-12-16 17:33:55 | 57.8    | 1.85         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:  62% | Processes:  1
+2025-12-16 17:34:55 | 59.3    | 1.85         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:  68% | Processes:  1
+2025-12-16 17:35:56 | 60.3    | 1.85         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:  72% | Processes:  1
+2025-12-16 17:36:57 | 61.4    | 1.85         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:  60% | Processes:  1
+2025-12-16 17:37:57 | 62      | 1.85         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:  77% | Processes:  1
+2025-12-16 17:38:58 | 62.3    | 1.85         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:  85% | Processes:  1
+2025-12-16 17:39:59 | 62.8    | 1.85         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:  60% | Processes:  1
+2025-12-16 17:40:59 | 63.2    | 1.85         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:  66% | Processes:  1
+2025-12-16 17:42:00 | 63.8    | 1.85         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:  71% | Processes:  1
+2025-12-16 17:43:01 | 64.2    | 1.59         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:  55% | Processes:  1
+2025-12-16 17:44:02 | 64.7    | 1.59         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:  46% | Processes:  1
+2025-12-16 17:45:03 | 65.3    | 1.59         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:  71% | Processes:  1
+2025-12-16 17:46:03 | 65.8    | 1.59         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:  28% | Processes:  1
+2025-12-16 17:47:04 | 66      | 1.59         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:   9% | Processes:  1
+2025-12-16 17:48:05 | 66.4    | 1.62         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:  51% | Processes:  1
+2025-12-16 17:49:05 | 66.6    | 1.63         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:  66% | Processes:  1
+2025-12-16 17:50:06 | 67.4    | 1.69         | GPU Slot: 1 | Mem:   0,00 GB | GPU Utilization:  91% | Processes:  1
