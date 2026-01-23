@@ -214,15 +214,38 @@ class Transforms3D(Transforms):
         return lambda arr: make_lowres_from_hr(center_crop_3d(_pre(arr), self.image_size), self.downsample)
     def get_t2w(self):  
         return lambda arr: center_crop_3d(_pre(arr), self.image_size)
+    
+    
+class TransformsLowField(Transforms):
+    def __init__(self, *args):
+        super().__init__(*args)
+    
+    def get_lowres(self):
+        return T.Compose([
+            T.CenterCrop(self.adc_size//self.downsample),
+            T.Resize(self.adc_size, interpolation=T.InterpolationMode.NEAREST),
+            T.Lambda(lambda img: torch.tensor(np.array(img), dtype=torch.float32).unsqueeze(0) / 255) #T.ToTensor(), 255???
+        ])
+        
+    def get_all_transforms(self):
+        return {
+            'ADC_condition': self.get_lowres(),
+            'ADC_input':     self.get_highres(),
+            'T2W_condition': self.get_t2w()
+        }
 
-def get_transforms(dims, image_size, downsample, upsample=False, t2w_offset=None):
-    if t2w_offset is not None:
+def get_transforms(dims, image_size, downsample, type=None, t2w_offset=None):
+    
+    if type=='offset':
         transforms = TransformsOffsetT2W(image_size, downsample, t2w_offset)
+    elif type=='upsample':
+        transforms = TransformsUpsample(image_size, downsample) 
+    elif type=='lowfield':
+        transforms = TransformsLowField(image_size, downsample)
+    elif dims==3:    
+        transforms = Transforms3D(image_size, downsample)
     else:
-        if dims == 2:
-            transforms = TransformsUpsample(image_size, downsample) if upsample else Transforms(image_size, downsample)
-        else:
-            transforms = Transforms3D(image_size, downsample)
+        Transforms(image_size, downsample)
         
     return transforms.get_all_transforms()
     
