@@ -10,6 +10,7 @@
 /results
 /results_*
 *.png
+*.jpg
 */wandb
 *.jpg
 *.pyc
