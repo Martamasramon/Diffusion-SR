@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-import torchvision.models  as models
+from torchvision.models import vgg16, VGG16_Weights
 
 # Simple loss function (L_simple) (MSE Loss)
 # Inputs:
@@ -191,10 +191,10 @@ class VGGPerceptualLoss(torch.nn.Module):
         super(VGGPerceptualLoss, self).__init__()
         self.device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')        
         blocks = []
-        blocks.append(models.vgg16(weights='DEFAULT').features[:4].to(self.device).eval())
-        blocks.append(models.vgg16(weights='DEFAULT').features[4:9].to(self.device).eval())
-        blocks.append(models.vgg16(weights='DEFAULT').features[9:16].to(self.device).eval())
-        blocks.append(models.vgg16(weights='DEFAULT').features[16:23].to(self.device).eval())
+        blocks.append(vgg16(weights=VGG16_Weights.DEFAULT).features[:4].to(self.device).eval())
+        blocks.append(vgg16(weights=VGG16_Weights.DEFAULT).features[4:9].to(self.device).eval())
+        blocks.append(vgg16(weights=VGG16_Weights.DEFAULT).features[9:16].to(self.device).eval())
+        blocks.append(vgg16(weights=VGG16_Weights.DEFAULT).features[16:23].to(self.device).eval())
         for bl in blocks:
             for p in bl:
                 p.requires_grad = False
