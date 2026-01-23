@@ -7,6 +7,7 @@
 *.pth
 /logs/*.csv
 /logs/*.json
+/logs/wandb
 /results
 /results_*
 *.png
@@ -14,4 +15,4 @@
 */wandb
 *.jpg
 *.pyc
-/__pychache__
+*/__pychache__
