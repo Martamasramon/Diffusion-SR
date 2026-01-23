@@ -13,7 +13,7 @@ def main():
     device    = set_device()
     
     model     = build_UNet(args, type='latent', img_channels=3)
-    diffusion = build_diffusion(args, model, auto_normalize=False)
+    diffusion = build_diffusion(args, model, type='latent', auto_normalize=False)
     load_model(args, model, diffusion, device)
     
     vae = load_vae(args.vae_type, args.greyscale)

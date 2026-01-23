@@ -15,7 +15,7 @@ def main():
     accelerator = Accelerator(split_batches=True, mixed_precision='no')
     
     model     = build_UNet(args, type='latent', img_channels=3)
-    diffusion = build_diffusion(args, model, auto_normalize=False)
+    diffusion = build_diffusion(args, model, type='latent', auto_normalize=False)
     
     if args.checkpoint:
         device    = set_device()
