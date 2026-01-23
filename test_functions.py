@@ -171,8 +171,8 @@ def visualize_batch(diffusion, dataloader, batch_size, device, use_T2W=False, co
         pred   = pred[:,0,:,:]
         lowres = batch['ADC_condition'].to(device)
         
-    print("orig min/max:", torch.min(lowres),torch.max(lowres))
-    print("rec  min/max:", torch.min(pred),torch.max(pred))
+    # print("orig min/max:", torch.min(lowres),torch.max(lowres))
+    # print("rec  min/max:", torch.min(pred),torch.max(pred))
     
     for i in range(batch_size):
         # Plot images

@@ -26,7 +26,8 @@ class MyDataset(Dataset):
         use_mask        = False, 
         downsample      = 2,
         upsample        = False,
-        t2w_offset      = None
+        t2w_offset      = False,
+        lowfield        = False
     ):
         super().__init__()
         
@@ -37,12 +38,14 @@ class MyDataset(Dataset):
         self.masked     = '_mask' if use_mask else ''
         self.img_path   = img_path + 'HistoMRI/target_adc' if is_finetune else img_path + 'PICAI' 
         self.upsample   = 'x4' if upsample else ''
-        self.img_dict   = pd.read_csv(f'/cluster/project7/ProsRegNet_CellCount/Dataset_preparation/CSV/{root}{self.upsample}{self.masked}_{data_type}.csv')
         self.t2w_embed  = t2w_embed
         self.use_T2W    = t2w or t2w_embed
         self.data_type  = data_type
         self.blank_prob = blank_prob
-        self.transforms = get_transforms(2, image_size, downsample, upsample, t2w_offset)
+        
+        self.processing = 'lowfield' if lowfield else 'upsample' if upsample else 'offset' if t2w_offset else None
+        self.img_dict   = pd.read_csv(f'/cluster/project7/ProsRegNet_CellCount/Dataset_preparation/CSV/{root}_{self.processing}{self.masked}_{data_type}.csv')
+        self.transforms = get_transforms(2, image_size, downsample, type=self.processing)
             
         print('\n', data_type)
         for i in self.transforms:
@@ -63,18 +66,24 @@ class MyDataset(Dataset):
         sample = {}
         
         if self.use_T2W:
-            t2w           = Image.open(f'{self.img_path}/T2W{self.masked}{self.upsample}/{item["SID"]}').convert('L')
-            # t2w          = Image.new('L', t2w.size, 0) # Test performance with blank image
+            if self.processing == 'lowfield':
+                t2w = Image.open(f'{self.img_path}/T2W_lowfield/{item["SID"]}').convert('L')
+            else:
+                t2w = Image.open(f'{self.img_path}/T2W{self.masked}/{item["SID"]}').convert('L')
+                # t2w = Image.new('L', t2w.size, 0) # Test performance with blank image
             sample['T2W_condition'] = self.transforms['T2W_condition'](t2w)
             
             if self.data_type == 'val':
-                sample['T2W_path'] = f'{self.img_path}/T2W{self.masked}{self.upsample}/{item["SID"]}'
+                sample['T2W_path'] = f'{self.img_path}/T2W{self.masked}/{item["SID"]}'
             
         if self.t2w_embed:
             sample['T2W_embed'] = self.t2w_model.get_all_embeddings(sample['T2W_condition'].unsqueeze(0))
         
         sample['ADC_condition'] = self.transforms['ADC_condition'](img)
         sample['ADC_input']     = self.transforms['ADC_input'](img)
+        
+        if self.processing == 'lowfield':
+            sample['ADC_condition'] = self.transforms['ADC_condition'](Image.open(f'{self.img_path}/ADC_lowfield/{item["SID"]}').convert('L'))  
         
         if 'ADC_target' in self.transforms.keys():
             sample['ADC_target']    = self.transforms['ADC_target'](img)  
@@ -84,7 +93,6 @@ class MyDataset(Dataset):
             sample['ADC_condition'] = torch.zeros_like(sample['ADC_condition'])
 
         return sample
-    
 
 class MyDataset3D(MyDataset):
     def __init__(self, *args):
