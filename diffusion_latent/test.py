@@ -12,6 +12,7 @@ from network_utils  import *
 from Diffusion      import Diffusion
 from UNet_Basic     import UNet_Basic
 from VAE            import load_vae
+from remap_checkpoint import remap_checkpoints
 
 import sys
 sys.path.append('../')
@@ -46,8 +47,10 @@ def main():
 
     print('Loading checkpoint...')
     checkpoint = torch.load(args.checkpoint, map_location=device)
-    diffusion.load_state_dict(checkpoint['model'])
-    
+    missing, unexpected = diffusion.load_state_dict(remap_checkpoints(checkpoint['model'], model), strict=False)
+    # print("Missing keys (first 20):",    missing[:20])
+    # print("Unexpected keys (first 20):", unexpected[:20])
+        
     # Move model to device
     model.to(device)
     diffusion.model = model

@@ -68,6 +68,7 @@ def main():
         t2w             = args.controlnet | args.use_T2W,
         t2w_offset      = args.t2w_offset,
         upsample        = args.upsample,
+        lowfield        = args.lowfield
     ) 
     test_dataset = MyDataset(
         folder, 
@@ -79,6 +80,7 @@ def main():
         t2w             = args.controlnet | args.use_T2W,
         t2w_offset      = args.t2w_offset,
         upsample        = args.upsample,
+        lowfield        = args.lowfield
     ) 
     train_dataloader = DataLoader(train_dataset, batch_size = args.batch_size, shuffle=True)
     test_dataloader  = DataLoader(test_dataset,  batch_size = args.batch_size, shuffle=False)

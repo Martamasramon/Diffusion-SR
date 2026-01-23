@@ -11,6 +11,7 @@ sys.path.append('../models')
 from network_utils  import *
 from Diffusion      import Diffusion
 from UNet_Basic     import UNet_Basic
+from remap_checkpoints import remap_checkpoints
 
 import sys
 sys.path.append('../')
@@ -40,9 +41,11 @@ def main():
         beta_schedule       = args.beta_schedule,
     )
 
-    print('Loading checkpoint...')
+    print('\nLoading checkpoint...')
     checkpoint = torch.load(args.checkpoint, map_location=device)
-    diffusion.load_state_dict(checkpoint['model'])
+    missing, unexpected = diffusion.load_state_dict(remap_checkpoints(checkpoint['model'], model), strict=False)
+    # print("Missing keys (first 20):",    missing[:20])
+    # print("Unexpected keys (first 20):", unexpected[:20])
     
     # Move model to device
     model.eval()
@@ -60,6 +63,7 @@ def main():
         downsample      = args.down,
         t2w             = args.controlnet | args.use_T2W,
         t2w_offset      = args.t2w_offset, 
+        lowfield        = args.lowfield
     ) 
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
 
@@ -68,8 +72,8 @@ def main():
     test_data = 'HistoMRI' if args.finetune else 'PICAI'
     
     # visualize_variability_t2w(diffusion, dataloader, args.batch_size, device, controlnet=args.controlnet, output_name=f'{save_name}_{test_data}')
-    visualize_variability(diffusion, dataloader, args.batch_size, device, controlnet=args.controlnet, output_name=f'{save_name}_{test_data}', use_T2W=args.use_T2W)
-    # visualize_batch(diffusion, dataloader, args.batch_size, device, controlnet=args.controlnet, output_name=f'{save_name}_{test_data}', use_T2W=args.use_T2W)
+    # visualize_variability(diffusion, dataloader, args.batch_size, device, controlnet=args.controlnet, output_name=f'{save_name}_{test_data}', use_T2W=args.use_T2W)
+    visualize_batch(diffusion, dataloader, args.batch_size, device, controlnet=args.controlnet, output_name=f'{save_name}_{test_data}', use_T2W=args.use_T2W)
     
     # print('Evaluating...')
     # evaluate_results(diffusion, dataloader, device, args.batch_size, use_T2W=args.use_T2W, controlnet=args.controlnet)
