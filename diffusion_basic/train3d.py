@@ -1,9 +1,3 @@
-import numpy as np
-import os
-import time
-import torch
-import glob
-import torch.nn as nn
 from accelerate import Accelerator
 from torch.utils.data import DataLoader
 
@@ -14,35 +8,25 @@ from UNet_3D        import UNet_3D
 
 import sys
 sys.path.append('../')
-from trainer_class  import Trainer
 from dataset        import MyDataset3D
 from arguments      import args
+from init_wandb import get_wandb_obj
+from train_test_functions import (
+    build_UNet, build_diffusion, load_model,
+    set_device, load_data, build_trainer
+)
 
 folder = '/cluster/project7/backup_masramon/PI-CAI/'
 
 def main():
     accelerator = Accelerator(split_batches=True, mixed_precision='no')
-
-    model = UNet_3D(
-        dim             = args.img_size,
-        dim_mults       = tuple(args.dim_mults),
-        self_condition  = args.self_condition,
-        controlnet      = args.controlnet,
-        concat_t2w      = args.use_T2W
-    )
     
-    diffusion = Diffusion(
-        model,
-        image_size          = args.img_size,
-        timesteps           = args.timesteps,
-        sampling_timesteps  = args.sampling_timesteps,
-        beta_schedule       = args.beta_schedule,
-        perct_λ             = args.perct_λ
-    )
+    model     = build_UNet(args, type='basic')
+    diffusion = build_diffusion(args, model)
     
     if args.checkpoint:
-        checkpoint = torch.load(args.checkpoint, map_location=torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
-        diffusion.load_state_dict(checkpoint['model'])
+        device    = set_device()
+        load_model(args, model, diffusion, device)
         
     # Dataset and dataloader
     train_dataset = MyDataset3D(
@@ -67,24 +51,9 @@ def main():
     train_dataloader = DataLoader(train_dataset, batch_size = args.batch_size, shuffle=True)
     test_dataloader  = DataLoader(test_dataset,  batch_size = args.batch_size, shuffle=False)
 
-    trainer = Trainer(
-        diffusion,
-        train_dataloader,
-        test_dataloader,
-        accelerator,
-        use_t2w             = args.controlnet | args.use_T2W,
-        batch_size          = args.batch_size,
-        lr                  = args.lr,
-        train_num_steps     = args.n_epochs,
-        gradient_accumulate_every = 2,
-        ema_decay           = args.ema_decay,
-        amp                 = False,
-        results_folder      = args.results_folder,
-        save_every          = args.save_every ,
-        sample_every        = args.sample_every,
-        save_best_and_latest_only = True
-    )
+    run = get_wandb_obj(args)
 
+    trainer = build_trainer(args,diffusion,train_dataloader,test_dataloader,accelerator,run)
     trainer.train()
     
 if __name__ == '__main__':

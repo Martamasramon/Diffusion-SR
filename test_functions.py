@@ -72,6 +72,7 @@ def get_target_prediction(batch, model_output):
         return batch['ADC_input'], model_output
     
 def evaluate_results(diffusion, dataloader, device, batch_size, use_T2W=False, controlnet=False):
+    model.eval()
     mse_list, psnr_list, ssim_list = [], [], []
     
     for batch in dataloader:
@@ -120,6 +121,7 @@ def plot_error(pred, highres, fig, axes, i, j):
     cbar = fig.colorbar(im_overlay, ax=axes[i, j])
     
 def visualize_batch(diffusion, dataloader, batch_size, device, use_T2W=False, controlnet=False, output_name="test_image", vae=None):
+    model.eval()
     ncols = 5 if use_T2W else 4
     fig, axes = plt.subplots(nrows=batch_size, ncols=ncols, figsize=(3*ncols,3*batch_size))
     axes[0,0].set_title('Low res (Input)')
@@ -198,6 +200,7 @@ def visualize_batch(diffusion, dataloader, batch_size, device, use_T2W=False, co
 
  
 def visualize_variability(diffusion, dataloader, batch_size, device, use_T2W=False, controlnet=False, output_name="test_image", num_rep=5, avg_std=False):
+    model.eval()
     ncols = 2+2*num_rep if use_T2W else 2+num_rep
     ncols = ncols+2 if avg_std else ncols
     fig, axes = plt.subplots(nrows=batch_size, ncols=ncols, figsize=(3*ncols,3*batch_size))
@@ -264,6 +267,7 @@ def visualize_variability(diffusion, dataloader, batch_size, device, use_T2W=Fal
  
  
 def visualize_variability_t2w(diffusion, dataloader, batch_size, device, controlnet=False, output_name="test_image", num_rep=5, avg_std=False):
+    model.eval()
     ncols = 2+2*num_rep
     ncols = ncols+2 if avg_std else ncols
     fig, axes = plt.subplots(nrows=batch_size, ncols=ncols, figsize=(3*ncols,3*batch_size))
@@ -336,6 +340,7 @@ def plot_image_vae(image, fig, axes, i, j, colorbar=True, std=False):
     axes[i, j].axis('off')
     
 def visualize_batch_vae(vae, dataloader, accelerator, output_name, greyscale=False):
+    model.eval()
     batch = next(iter(dataloader))
     x = batch.get("T2W_condition", batch["ADC_input"])
     x = x.to(accelerator.device)

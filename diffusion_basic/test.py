@@ -1,71 +1,20 @@
-import time
-import torch
-import argparse
-import torch.nn as nn
-import os
-import matplotlib.pyplot as plt
-from torch.utils.data import DataLoader
-
-import sys
-sys.path.append('../models')
-from network_utils  import *
-from Diffusion      import Diffusion
-from UNet_Basic     import UNet_Basic
-from remap_checkpoints import remap_checkpoints
-
 import sys
 sys.path.append('../')
-from dataset         import MyDataset
-from test_functions  import *
-from arguments       import args
-
-folder = '/cluster/project7/backup_masramon/IQT/'
+from test_functions import *
+from arguments      import args
+from train_test_functions import (
+    build_UNet, build_diffusion, load_model,
+    set_device, load_data
+)
  
 def main():
-    assert torch.cuda.is_available(), "CUDA not available!"
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    model = UNet_Basic(
-        dim             = args.img_size,
-        dim_mults       = tuple(args.dim_mults),
-        self_condition  = args.self_condition,
-        controlnet      = args.controlnet,
-        concat_t2w      = args.use_T2W,
-    )
-
-    diffusion = Diffusion(
-        model,
-        image_size          = args.img_size,
-        timesteps           = args.timesteps,
-        sampling_timesteps  = args.sampling_timesteps,
-        beta_schedule       = args.beta_schedule,
-    )
-
-    print('\nLoading checkpoint...')
-    checkpoint = torch.load(args.checkpoint, map_location=device)
-    missing, unexpected = diffusion.load_state_dict(remap_checkpoints(checkpoint['model'], model), strict=False)
-    # print("Missing keys (first 20):",    missing[:20])
-    # print("Unexpected keys (first 20):", unexpected[:20])
+    device    = set_device()
     
-    # Move model to device
-    model.eval()
-    model.to(device)
-    diffusion.model = model
-    diffusion.to(device)
+    model     = build_UNet(args, type='basic')
+    diffusion = build_diffusion(args, model)
+    load_model(args, model, diffusion, device)
     
-    print('Loading data...')
-    dataset     = MyDataset(
-        folder, 
-        data_type       = 'val', 
-        image_size      = args.img_size, 
-        is_finetune     = args.finetune,
-        use_mask        = args.use_mask, 
-        downsample      = args.down,
-        t2w             = args.controlnet | args.use_T2W,
-        t2w_offset      = args.t2w_offset, 
-        lowfield        = args.lowfield
-    ) 
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
+    dataloader = load_data(args, 'val')
 
     print('Visualising...')
     save_name = args.save_name if args.save_name is not None else os.path.basename(os.path.dirname(args.checkpoint))
