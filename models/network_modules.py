@@ -794,3 +794,16 @@ class ZeroConv2d(nn.Conv2d):
         nn.init.zeros_(self.weight)
         nn.init.zeros_(self.bias)
         
+
+class Identity(nn.Module):
+    def forward(self, x, *args, **kwargs):
+        return x
+    
+        
+def make_time_mlp(dim: int) -> nn.Module:
+    return nn.Sequential(
+        SinusoidalPosEmb(dim),
+        nn.Linear(dim, dim * 4),
+        nn.GELU(),
+        nn.Linear(dim * 4, dim),
+    )
