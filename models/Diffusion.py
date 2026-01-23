@@ -2,7 +2,7 @@ import lpips
 import torch
 import torch.nn.functional as F
 from torch          import nn
-from torch.cuda.amp import autocast
+from torch.amp      import autocast
 from einops         import rearrange, reduce
 from tqdm.auto      import tqdm
 from random         import random
@@ -51,7 +51,7 @@ class Diffusion(nn.Module):
         beta_schedule           = 'sigmoid', ## vs 'linear'
         schedule_fn_kwargs      = dict(),
         ddim_sampling_eta       = 0.,        ## vs 1.
-        auto_normalize          = True,         # False for latent diffusion !!!
+        auto_normalize          = True,      # False for latent diffusion !!!
         min_snr_gamma           = 5,
         loss_weights            = {'mse':1, 'ssim':0, 'perct':0},
     ):
@@ -136,6 +136,10 @@ class Diffusion(nn.Module):
         
         self.loss           = Losses()
         self.loss_weights   = loss_weights
+        
+        print('Training loss weights:')
+        for loss in loss_weights.keys():
+            print(loss, loss_weights[loss])
 
     @property
     def device(self):
@@ -287,7 +291,7 @@ class Diffusion(nn.Module):
         return sample_fn((batch_size, channels, image_size, image_size), low_res, control=control, return_all_timesteps = return_all_timesteps, t2w=t2w)
 
 
-    @autocast(enabled = False)
+    @autocast('cuda', enabled = False)
     def q_sample(self, x_start, t, t2w=None, noise = None):
         noise = default(noise, lambda: torch.randn_like(x_start))
 
