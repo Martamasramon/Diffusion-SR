@@ -349,3 +349,116 @@ class Trainer(object):
                     pbar.update(100)
 
         accelerator.print('training complete')
+
+
+
+class Trainer_mod(Trainer):
+    def __init__(self, *args, **kwargs):
+        # IMPORTANT: forward args to base Trainer
+        super().__init__(*args, **kwargs)
+
+    def calc_loss(self, train=True):
+        if train:
+            if self.finetune_controlnet:
+                self.model.eval()
+                self.model.controlnet.train()
+            else:
+                self.model.train()
+        else:
+            self.model.eval()
+
+        total_loss = 0.0
+        total_losses = {}  # dynamic keys (mse/perct/ssim/loss_t2w/...)
+
+        if self.vae is not None:
+            # keep your latent recon logging if you still want it
+            total_losses["recon_mse"] = 0.0
+            total_losses["recon_perct"] = 0.0
+            total_losses["recon_ssim"] = 0.0
+
+        dataloader = self.train_dataloader if train else self.test_dataloader
+
+        for _ in range(self.gradient_accumulate_every):
+            data = next(dataloader)
+
+            # move to device
+            if self.vae is not None:
+                data["Image_target"] = data["ADC_condition"]
+
+            for key, value in data.items():
+                try:
+                    data[key] = value.to(self.accelerator.device)
+                except:
+                    data[key] = [i.to(self.accelerator.device) for i in value]
+
+                # latent encode if needed
+                if self.vae is not None and key in ["ADC_input", "ADC_condition", "ADC_target", "T2W_condition", "T2W_target"]:
+                    data[key], _ = encode_latent(data[key], self.vae)
+
+            with self.accelerator.autocast():
+                control = data["T2W_condition"] if getattr(self.model, "controlnet", None) else None
+
+                # ADC eval target
+                if "ADC_target" in data:
+                    defined_target = data["ADC_target"]
+                    eval_transform = downsample_transform(self.img_size)
+                else:
+                    defined_target, eval_transform = None, None
+
+                # NEW: T2W condition + optional clean target
+                t2w_def = data["T2W_condition"] if self.use_t2w else None
+                t2w_tgt = data.get("T2W_target", None)  # requires dataset to provide it for supervised T2W branch
+
+                # IMPORTANT: Diffusion_mod returns (prediction, loss, logs, t)
+                prediction, loss, logs, t = self.model(
+                    data["ADC_input"],
+                    data["ADC_condition"],
+                    t2w_def,
+                    control,
+                    t2w_target=t2w_tgt,
+                    defined_target=defined_target,
+                    eval_transform=eval_transform,
+                )
+
+                # optional latent recon loss (same as your original logic)
+                if self.vae is not None and self.image_loss_weights is not None:
+                    reconstruction = decode_latent(prediction, self.vae)[:, 0, :, :].unsqueeze(1)
+                    img_target = data["Image_target"]
+
+                    recon_mse = self.image_loss.calc_mse(reconstruction, img_target)
+                    recon_perct = self.image_loss.calc_percept(reconstruction, img_target)
+                    recon_ssim = self.image_loss.calc_ssim(reconstruction, img_target)
+
+                    # per-sample recon loss for SNR weighting
+                    recon_loss = (
+                        self.image_loss_weights["mse"] * recon_mse
+                        + self.image_loss_weights["perct"] * recon_perct
+                        + self.image_loss_weights["ssim"] * recon_ssim
+                    )
+                    recon_loss *= extract(self.model.loss_weight, t, recon_loss.shape)
+                    loss = loss + recon_loss.mean()
+
+                    # log recon components
+                    logs["recon_mse"] = recon_mse.mean()
+                    logs["recon_perct"] = recon_perct.mean() if isinstance(recon_perct, torch.Tensor) else torch.tensor(0.0, device=self.device)
+                    logs["recon_ssim"] = recon_ssim.mean()
+
+                # accumulate totals
+                total_loss += loss.detach().item() / self.gradient_accumulate_every
+
+                for name, val in logs.items():
+                    if isinstance(val, torch.Tensor):
+                        val = val.mean()
+                        val_item = val.detach().item()
+                    else:
+                        val_item = float(val)
+
+                    total_losses[name] = total_losses.get(name, 0.0) + val_item / self.gradient_accumulate_every
+
+            if train:
+                self.accelerator.backward(loss)
+
+        return data, total_loss, total_losses
+
+    # You can keep sample_images identical for now (it will still sample ADC via diffusion.sample()).
+    # If later you extend sampling to output T2W too, we can adjust here.
