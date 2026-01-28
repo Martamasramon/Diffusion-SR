@@ -77,8 +77,8 @@ def run_diffusion(diffusion, lowres, t2w_input, controlnet=False):
     """
     kwargs = {"batch_size": lowres.shape[0]}
     # Add optional conditioning kwargs
-    if t2w is not None:
-        kwargs["control" if controlnet else "t2w"] = t2w
+    if t2w_input is not None:
+        kwargs["control" if controlnet else "t2w"] = t2w_input
     
     # Sampling is inference-only
     with torch.no_grad():
