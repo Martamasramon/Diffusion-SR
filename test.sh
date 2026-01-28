@@ -8,7 +8,7 @@
 
 #$ -wd /cluster/project7/ProsRegNet_CellCount/CriDiff/
 #$ -N Test_diffusion
-#$ -t 1-14
+#$ -t 1-11
 
 date
 hostname
@@ -22,20 +22,29 @@ export PATH="/cluster/project7/ProsRegNet_CellCount/CriDiff/CriDiff_env/bin:$PAT
 
 CMD_LIST=(
   ### Basic ###
-  "cd diffusion_basic && python3 test.py --checkpoint './pretrain/model-8.pt' "
-  "cd diffusion_basic && python3 test.py --checkpoint './pretrain_mask/model-best.pt' --use_mask "
-  "cd diffusion_basic && python3 test.py --checkpoint './test_controlnet/model-best.pt' --down 8 --controlnet"
+  "cd diffusion_basic && python3 test.py --checkpoint './lowfield/model-best.pt' --lowfield"
+  "cd diffusion_basic && python3 test.py --checkpoint './lowfield_perct/model-best.pt' --lowfield"
+  "cd diffusion_basic && python3 test.py --checkpoint './lowfield_concat/model-best.pt' --lowfield --use_T2W "
+  "cd diffusion_basic && python3 test.py --checkpoint './lowfield_concat2/model-best.pt' --lowfield --use_T2W "
 
   ### Attention ###
-  "cd diffusion_attention && python3 test.py --checkpoint './concat_prob02/model-best.pt' --use_T2W"
-  "cd diffusion_attention && python3 test.py --checkpoint './concat_down8_offset20/model-best.pt' --use_T2W --down 8 --t2w_offset 20"
+  "cd diffusion_attention && python3 test.py --checkpoint './lowfield/model-best.pt' --lowfield --use_T2W"
+
+  ### Latent ###
+  "cd diffusion_latent && python3 test.py --checkpoint './lowfield/model-best.pt' --lowfield "
+  "cd diffusion_latent && python3 test.py --checkpoint './lowfield_recon/model-best.pt' --lowfield "
+  "cd diffusion_latent && python3 test.py --checkpoint './lowfield_recon_prednoise/model-best.pt'--lowfield  "
+
+  "cd diffusion_latent && python3 test.py --checkpoint './lowfield_t2w/model-best.pt' --lowfield --use_T2W"
+  "cd diffusion_latent && python3 test.py --checkpoint './lowfield_t2w_recon/model-best.pt' --lowfield --use_T2W"
+  "cd diffusion_latent && python3 test.py --checkpoint './lowfield_t2w_recon_prednoise/model-best.pt' --lowfield --use_T2W"
 
   ### Autoencoder ###
-  "cd autoencoder && python3 test.py --batch_size 5 --down 1 --save_name 'ADC_pretrained'"
-  "cd autoencoder && python3 test.py --batch_size 5 --down 1 --checkpoint 'ADC_VAE_grey/vae_100'  --save_name 'ADC_grey_100'  --greyscale"
+  # "cd autoencoder && python3 test.py --batch_size 5 --down 1 --save_name 'ADC_pretrained'"
+  # "cd autoencoder && python3 test.py --batch_size 5 --down 1 --checkpoint 'ADC_VAE_grey/vae_100'  --save_name 'ADC_grey_100'  --greyscale"
   
-  "cd autoencoder && python3 test.py --batch_size 5 --use_T2W --save_name 'T2W_pretrained'"
-  "cd autoencoder && python3 test.py --batch_size 5 --use_T2W --checkpoint 'T2W_VAE_grey/vae_50'  --save_name 'T2W_grey_50'  --greyscale"
+  # "cd autoencoder && python3 test.py --batch_size 5 --use_T2W --save_name 'T2W_pretrained'"
+  # "cd autoencoder && python3 test.py --batch_size 5 --use_T2W --checkpoint 'T2W_VAE_grey/vae_50'  --save_name 'T2W_grey_50'  --greyscale"
 )
 
 IDX=$((SGE_TASK_ID - 1))

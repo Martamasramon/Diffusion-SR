@@ -20,7 +20,7 @@ def set_device():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     return device
 
-def get_img_size(args):
+def get_img_size(args, type='basic'):
     if args.upsample:
         img_size = args.img_size*args.down
     elif type=='latent':
@@ -32,9 +32,10 @@ def get_img_size(args):
     
     
 def build_UNet(args, type='basic', img_channels=1):
-    img_size = get_img_size(args)
+    img_size = get_img_size(args, type)
     
     if type == 'basic' or type == 'latent':
+        print('Building basic UNet model...')
         return UNet_Basic(
             dim             = img_size,
             dim_mults       = tuple(args.dim_mults),
@@ -44,19 +45,21 @@ def build_UNet(args, type='basic', img_channels=1):
             img_channels    = img_channels
         )
     elif type == 'attn':
-        model = UNet_Attn(
+        print('Building attention UNet model...')
+        return UNet_Attn(
         dim             = img_size,
         dim_mults       = tuple(args.dim_mults),
         self_condition  = args.self_condition,
         use_T2W         = args.use_T2W,
+        img_channels    = img_channels
     )
     else:
         raise ValueError(f"Unknown UNet type: {type}")
     
  
-def build_diffusion(args, model, auto_normalize=True):
-    img_size = get_img_size(args)
-    
+def build_diffusion(args, model, type='basic', auto_normalize=True):
+    img_size = get_img_size(args, type)
+
     return Diffusion(
         model,
         image_size          = img_size,

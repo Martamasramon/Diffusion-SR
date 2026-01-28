@@ -8,7 +8,7 @@
 
 #$ -wd /cluster/project7/ProsRegNet_CellCount/CriDiff/
 #$ -N Train_diffusion
-#$ -t 1-5
+#$ -t 1-4
 
 date
 nvidia-smi
@@ -21,10 +21,10 @@ export PATH="/cluster/project7/ProsRegNet_CellCount/CriDiff/CriDiff_env/bin:$PAT
 
 CMD_LIST=(
     ### Basic ###
-    "cd diffusion_basic && python3 train.py --results_folder './lowfield_perct' --lowfield"
+    # "cd diffusion_basic && python3 train.py --results_folder './lowfield_perct' --lowfield"
 
       ### T2W ###
-      "cd diffusion_basic && python3 train.py --results_folder './lowfield_concat' --use_T2W --lowfield"
+      # "cd diffusion_basic && python3 train.py --results_folder './lowfield_concat' --use_T2W --lowfield"
       
       ### T2W Offset ###
       # "cd diffusion_basic && python3 train.py --results_folder './concat_down8_offset20' --use_T2W --down 8 --t2w_offset 20"
@@ -39,11 +39,13 @@ CMD_LIST=(
       # "cd diffusion_basic && python3 train3d.py --results_folder './pretrain_3d'"
     
     ### Attention ###
-    "cd diffusion_attention && python3 train.py --results_folder './lowfield' --use_T2W --lowfield"
+    # "cd diffusion_attention && python3 train.py --results_folder './lowfield' --use_T2W --lowfield"
 
     ### Latent ###
-    "cd diffusion_latent && python3 train.py --results_folder './lowfield' --lowfield"
-    "cd diffusion_latent && python3 train.py --results_folder './lowfield_t2w' --use_T2W --lowfield"
+    "cd diffusion_latent && python3 train.py --recon_mse 0.01 --results_folder './lowfield_recon' --lowfield"
+    "cd diffusion_latent && python3 train.py --recon_mse 0.01 --results_folder './lowfield_t2w_recon' --use_T2W --lowfield"
+    "cd diffusion_latent && python3 train.py --recon_mse 0.01 --objective 'pred_noise' --results_folder './lowfield_recon_prednoise' --lowfield"
+    "cd diffusion_latent && python3 train.py --recon_mse 0.01 --objective 'pred_noise' --results_folder './lowfield_t2w_recon_prednoise' --use_T2W --lowfield"
 
     ### Autoencoder ###
     # "cd autoencoder &&  python3 train.py --results_folder './ADC' --lr 0.00000001 ---n_epochs 100 --batch_size 64 --save_every 50 --down 1 --greyscale"
