@@ -68,7 +68,7 @@ def add_batch_metrics_to_list(prediction, highres, mse_list, psnr_list, ssim_lis
     return mse_list, psnr_list, ssim_list
 
 
-def run_diffusion(diffusion, lowres, t2w_input, controlnet=False):
+def run_diffusion(diffusion, lowres, t2w_input, controlnet=False, perform_uq=False, num_rep=None):
     """
     Unified diffusion sampling call.
     - lowres: the conditioned input (e.g., downsampled ADC)
@@ -77,8 +77,10 @@ def run_diffusion(diffusion, lowres, t2w_input, controlnet=False):
     """
     kwargs = {"batch_size": lowres.shape[0]}
     # Add optional conditioning kwargs
-    if t2w is not None:
-        kwargs["control" if controlnet else "t2w"] = t2w
+    if t2w_input is not None:
+        kwargs["control" if controlnet else "t2w"] = t2w_input
+    kwargs['perform_uq'] = perform_uq  # Disable multiple reruns for standard sampling
+    kwargs['num_rep']    = num_rep if perform_uq else None  # Number of samples for UQ
     
     # Sampling is inference-only
     with torch.no_grad():
@@ -243,7 +245,7 @@ def get_batch_images(dataloader, device, use_T2W, vae=None, ):
 
 def visualize_batch(
     diffusion, dataloader, batch_size, device,
-    use_T2W=False, controlnet=False, output_name="test_image", vae=None, add_error=True
+    use_T2W=False, controlnet=False, output_name="test_image", vae=None, add_error=True, perform_uq=False, num_rep=None
 ):
     """
     Visualize a single batch:
@@ -253,12 +255,14 @@ def visualize_batch(
       - optional error map
       - highres ground truth
     """
-    fig, axes, ncols = create_plot(batch_size, use_T2W, num_rep=None, add_error=add_error)
+    avg_std = False if not perform_uq else True
+    num_rep = num_rep if perform_uq else None
+    fig, axes, ncols = create_plot(batch_size, use_T2W, num_rep=num_rep, add_error=add_error, avg_std=avg_std)
     highres, lowres, t2w_input, batch = get_batch_images(dataloader, device, use_T2W, vae)
     
     # Run model sampling
     if diffusion is not None:
-        pred = run_diffusion(diffusion, lowres, t2w_input, controlnet)
+        pred = run_diffusion(diffusion, lowres, t2w_input, controlnet, perform_uq, num_rep)
         
     # else:
     #     lowres    = batch['ADC_condition']
@@ -269,10 +273,34 @@ def visualize_batch(
     #     lowres    = lowres.to(device)
     
     # Optional: decode from latent to pixel space for visualization
+    pred, pred_std = None, None
+    decoded_x0_samples = []
     if vae is not None:
-        pred   = decode_latent(pred, vae) if diffusion is not None else decode_latent(lowres, vae)
+        if diffusion is not None:
+            if not perform_uq:
+                pred = decode_latent(pred, vae)
+            else:
+                # Decode each sample in the UQ output
+                for i in range(pred.shape[1]):
+                    decoded_x0_sample = decode_latent(pred[:,i,:,:,:], vae)
+                    decoded_x0_samples.append(decoded_x0_sample)
+                decoded_x0_samples = torch.stack(decoded_x0_samples, dim=1)  # Shape: (batch_size, num_reruns, C, H, W)
+                pred = decoded_x0_samples.mean(dim=1)  # Use mean prediction for visualization; shape: (batch_size, C, H, W)
+                pred_std = decoded_x0_samples.std(dim=1)  # Use std for uncertainty maps; shape: (batch_size, C, H, W)
+        else:
+            pred = decode_latent(lowres, vae)
         pred   = pred[:,0,:,:]
+        if pred_std is not None:
+            pred_std = pred_std[:,0,:,:]
         lowres = batch['ADC_condition'].to(device)
+    
+    elif perform_uq:
+        for i in range(pred.shape[1]):
+            decoded_x0_sample = pred[:,i,:,:,:]
+            decoded_x0_samples.append(decoded_x0_sample)
+        decoded_x0_samples = torch.stack(decoded_x0_samples, dim=1)  # Shape: (batch_size, num_reruns, C, H, W)
+        pred = decoded_x0_samples.mean(dim=1)  # Use mean prediction for visualization; shape: (batch_size, C, H, W)
+        pred_std = decoded_x0_samples.std(dim=1)  # Use std for uncertainty maps; shape: (batch_size, C, H, W)
     
     for i in range(batch_size):
         count = 0
@@ -288,14 +316,29 @@ def visualize_batch(
                 plot_image(t2w_input[i], fig, axes, i, 1)
             else:
                 plot_image(t2w_input[0][i], fig, axes, i, 1)
+
         # SR output column
-        plot_image(pred[i], fig, axes, i, 1+count)
+        if not perform_uq:
+            count += 1
+            plot_image(pred[i], fig, axes, i, count)
+
+        if avg_std and perform_uq:
+            # Repetition columns: SR outputs
+            for rep in range(num_rep):
+                count += 1
+                plot_image(decoded_x0_samples[i][rep], fig, axes, i, count)
+            # mean/std columns (optional; only if UQ performed)
+            plot_image(pred[i], fig, axes, i, count+1)
+            plot_image(pred_std[i],  fig, axes, i, count+2, kind='std')
+            count += 2
+
         # Error column (optional)
         if add_error:
-            plot_image(pred[i], fig, axes, i, 2+count, False)
-            plot_error(pred[i], highres[i], fig, axes, i, 2+count)
+            plot_image(pred[i], fig, axes, i, count+1, False)
+            plot_error(pred[i], highres[i], fig, axes, i, count+2)
+            count += 2
         # Ground truth (last column)
-        plot_image(highres[i], fig, axes, i, ncols-1)
+        plot_image(highres[i], fig, axes, i, count+1)
     
     fig.tight_layout(pad=0.25)
     save_path = os.path.join('./test_images', output_name+'.jpg')

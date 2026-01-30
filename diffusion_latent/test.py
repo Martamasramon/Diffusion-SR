@@ -26,7 +26,9 @@ def main():
     test_data = 'HistoMRI' if args.finetune else 'PICAI'
     
     print('Visualising...')
-    visualize_batch(diffusion, dataloader, args.batch_size, device, controlnet=args.controlnet, output_name=f'{save_name}_{test_data}', use_T2W=args.use_T2W, vae=vae)
+    perform_uq = args.perform_uq
+    num_rep    = args.num_repeats if perform_uq else None
+    visualize_batch(diffusion, dataloader, args.batch_size, device, controlnet=args.controlnet, output_name=f'{save_name}_{test_data}', use_T2W=args.use_T2W, vae=vae, perform_uq=perform_uq, num_rep=num_rep)
     
     # print('Evaluating...')
     evaluate_results(diffusion, dataloader, device, args.batch_size, use_T2W=args.use_T2W, controlnet=args.controlnet)
