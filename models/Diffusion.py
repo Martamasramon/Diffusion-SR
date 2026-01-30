@@ -242,14 +242,14 @@ class Diffusion(nn.Module):
 
 
     @torch.no_grad()
-    def ddim_sample(self, shape, low_res, control=None, return_all_timesteps = False, t2w=None):
+    def ddim_sample(self, shape, low_res, control=None, return_all_timesteps = False, t2w=None, generator=None):
         batch, device, total_timesteps, sampling_timesteps, eta, objective = shape[0], self.device, self.num_timesteps, self.sampling_timesteps, self.ddim_sampling_eta, self.objective
 
         times = torch.linspace(-1, total_timesteps - 1, steps = sampling_timesteps + 1)   # [-1, 0, 1, 2, ..., T-1] when sampling_timesteps == total_timesteps
         times = list(reversed(times.int().tolist()))
         time_pairs = list(zip(times[:-1], times[1:])) # [(T-1, T-2), (T-2, T-3), ..., (1, 0), (0, -1)]
 
-        img     = torch.randn(shape, device = device)
+        img     = torch.randn(shape, device = device, generator=generator)
         imgs    = [img]
         x_start = None
 
@@ -271,7 +271,7 @@ class Diffusion(nn.Module):
             sigma = eta * ((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha)).sqrt()
             c = (1 - alpha_next - sigma ** 2).sqrt()
 
-            noise = torch.randn_like(img)
+            noise = torch.randn_like(img, device=device, generator=generator)
 
             img = preds.x_start * alpha_next.sqrt() + \
                   c * preds.pred_noise + \
@@ -283,12 +283,33 @@ class Diffusion(nn.Module):
         ret = self.unnormalize(ret)
         return ret
 
-
     @torch.no_grad()
-    def sample(self, low_res, control=None, batch_size = 16, return_all_timesteps = False, t2w=None):
+    def sample(self, low_res, control=None, batch_size = 16, return_all_timesteps = False, t2w=None, perform_uq=False, num_rep=None):
         image_size, channels = self.image_size, self.channels
         sample_fn            = self.p_sample_loop if not self.is_ddim_sampling else self.ddim_sample
-        return sample_fn((batch_size, channels, image_size, image_size), low_res, control=control, return_all_timesteps = return_all_timesteps, t2w=t2w)
+
+        self.model.eval()
+
+        if self.is_ddim_sampling and perform_uq and num_rep:
+
+            seeds = torch.randint(0, 1e6, (num_rep,), device=self.device)
+            imgs_pred = []
+
+            for seed in seeds:
+                generator = torch.Generator(device=self.device)
+                torch.manual_seed(seed.item())
+                torch.cuda.manual_seed(seed.item())
+                img_pred = sample_fn((batch_size, channels, image_size, image_size), low_res, control=control, return_all_timesteps = return_all_timesteps, t2w=t2w, generator=generator)
+                imgs_pred.append(img_pred)
+            
+            imgs_pred = torch.stack(imgs_pred, dim=1)  # Shape: (batch_size, num_reruns, C, H, W)
+            # imgs_pred_mean = imgs_pred.mean(dim=1)
+            # imgs_pred_std  = imgs_pred.std(dim=1)
+
+            return imgs_pred # Return all samples for uncertainty quantification
+
+        else:
+            return sample_fn((batch_size, channels, image_size, image_size), low_res, control=control, return_all_timesteps = return_all_timesteps, t2w=t2w)
 
 
     @autocast('cuda', enabled = False)

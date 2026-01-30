@@ -39,6 +39,9 @@ CMD_LIST=(
   "cd diffusion_latent && python3 test.py --checkpoint './lowfield_t2w_recon/model-best.pt' --lowfield --use_T2W"
   "cd diffusion_latent && python3 test.py --checkpoint './lowfield_t2w_recon_prednoise/model-best.pt' --lowfield --use_T2W"
 
+  ### Latent UQ (Added as a template, please modify the desired checkpoint path as needed) ###
+  # "cd diffusion_latent && python3 test.py --checkpoint './lowfield_t2w_recon/model-best.pt' --lowfield --use_T2W --perform_uq --num_reruns 24"
+
   ### Autoencoder ###
   # "cd autoencoder && python3 test.py --batch_size 5 --down 1 --save_name 'ADC_pretrained'"
   # "cd autoencoder && python3 test.py --batch_size 5 --down 1 --checkpoint 'ADC_VAE_grey/vae_100'  --save_name 'ADC_grey_100'  --greyscale"
