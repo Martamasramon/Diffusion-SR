@@ -9,6 +9,7 @@ from skimage.metrics import peak_signal_noise_ratio as psnr_metric
 from skimage.metrics import mean_squared_error      as mse_metric
 from transforms import downsample_transform
 from PIL import Image
+from scipy.stats import spearmanr
 
 import sys
 sys.path.append('../models')
@@ -174,6 +175,28 @@ def plot_error(pred, highres, fig, axes, i, j):
     im_overlay = axes[i, j].imshow(err_norm, cmap='RdYlGn_r', vmin=0, vmax=1, alpha=0.6)
     cbar = fig.colorbar(im_overlay, ax=axes[i, j])
 
+def plot_uq_error_corr(pred, highres, pred_std, fig, axes, i=None, j=None):
+    """
+    Plot uncertainty quantification results:
+      - Absolute error between pred and highres
+      - Predicted std deviation map
+      - Correlation scatter plot between error and predicted std
+    """
+    err = np.abs(format_image(pred) - format_image(highres))
+    pred_std_np = format_image(pred_std)
+
+    # Scatter plot data
+    err_flat     = err.flatten()
+    pred_std_flat = pred_std_np.flatten()
+
+    rho, p = spearmanr(err_flat, pred_std_flat)
+
+    # Correlation scatter plot
+    axes[i, j].scatter(pred_std_flat, err_flat, alpha=0.5)
+    axes[i, j].set_xlabel('Predicted Std Deviation')
+    axes[i, j].set_ylabel('Absolute Error')
+    axes[i, j].set_title(f'Uncertainty-Error Correlation (Spearman $\rho$={rho:.2f})')
+
 
 def create_plot(batch_size, use_T2W, num_rep=None, offset=False, add_error=False, avg_std=False):
     """
@@ -207,6 +230,9 @@ def create_plot(batch_size, use_T2W, num_rep=None, offset=False, add_error=False
             titles += ["Average Output", "Std Output"]
 
         titles += ["High res (Ground truth)"]
+
+        if add_error and not avg_std:
+            titles += ["Uncertainty-Error Correlation"]
     
     ncols = len(titles)
 
@@ -339,6 +365,12 @@ def visualize_batch(
             count += 2
         # Ground truth (last column)
         plot_image(highres[i], fig, axes, i, count+1)
+        count += 1
+
+        if add_error and not avg_std:
+            # Plot UQ error correlation if applicable
+            plot_uq_error_corr(pred[i], highres[i], pred_std[i], fig, axes, i, count+1)
+            count += 1
     
     fig.tight_layout(pad=0.25)
     save_path = os.path.join('./test_images', output_name+'.jpg')
