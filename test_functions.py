@@ -195,7 +195,7 @@ def plot_uq_error_corr(pred, highres, pred_std, fig, axes, i=None, j=None):
     axes[i, j].scatter(pred_std_flat, err_flat, alpha=0.5)
     axes[i, j].set_xlabel('Predicted Std Deviation')
     axes[i, j].set_ylabel('Absolute Error')
-    axes[i, j].set_title(f'Uncertainty-Error Correlation (Spearman $\\rho$={rho:.2f})')
+    axes[i, j].set_title(f'Uncertainty-Error Correlation (Spearman $\rho$={rho:.2f})')
 
 
 def create_plot(batch_size, use_T2W, num_rep=None, offset=False, add_error=False, avg_std=False):
