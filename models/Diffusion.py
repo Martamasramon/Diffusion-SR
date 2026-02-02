@@ -297,8 +297,8 @@ class Diffusion(nn.Module):
 
             for seed in seeds:
                 generator = torch.Generator(device=self.device)
-                torch.manual_seed(seed.item())
-                torch.cuda.manual_seed(seed.item())
+                generator.manual_seed(seed.item())
+                # torch.cuda.manual_seed(seed.item())
                 img_pred = sample_fn((batch_size, channels, image_size, image_size), low_res, control=control, return_all_timesteps = return_all_timesteps, t2w=t2w, generator=generator)
                 imgs_pred.append(img_pred)
             
