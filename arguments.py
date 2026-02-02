@@ -37,7 +37,7 @@ parser.add_argument('--sample_every',       type=int,  default=2000)
 parser.add_argument('--checkpoint',         type=str,  default=None) #'./results_perct/model-8.pt'
 parser.add_argument('--save_name',          type=str,  default=None)
 # Uncertainty quantification
-parser.add_argument('--num_repeats',        type=int,  default=30)
+parser.add_argument('--num_repeats',        type=int,  default=None)
 # Bools
 parser.add_argument('--use_T2W',            action='store_true')
 parser.add_argument('--use_histo',          action='store_true')
