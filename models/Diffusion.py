@@ -271,7 +271,7 @@ class Diffusion(nn.Module):
             sigma = eta * ((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha)).sqrt()
             c = (1 - alpha_next - sigma ** 2).sqrt()
 
-            noise = torch.randn_like(img, device=device, generator=generator)
+            noise = torch.randn(img.shape,device=img.device,dtype=img.dtype,generator=generator)
 
             img = preds.x_start * alpha_next.sqrt() + \
                   c * preds.pred_noise + \
@@ -292,7 +292,7 @@ class Diffusion(nn.Module):
 
         if self.is_ddim_sampling and perform_uq and num_rep:
 
-            seeds = torch.randint(0, 1e6, (num_rep,), device=self.device)
+            seeds = torch.randint(0, int(1e6), (num_rep,), device=self.device)
             imgs_pred = []
 
             for seed in seeds:
