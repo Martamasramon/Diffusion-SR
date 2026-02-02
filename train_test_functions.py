@@ -5,6 +5,7 @@ import sys
 sys.path.append('../models')
 from Diffusion       import Diffusion
 from UNet_Basic      import UNet_Basic 
+from UNet_DisC_Diff  import UNet_DisC_Diff
 from UNet_DisC_Diff  import UNet_Basic as UNet_Basic_DiscDiff
 from UNet_Attn       import UNet_Attn
 from load_controlnet import load_pretrained_with_controlnet
@@ -61,6 +62,13 @@ def build_UNet(args, type='basic', img_channels=1, discdiff=False):
         use_T2W         = args.use_T2W,
         img_channels    = img_channels
     )
+    elif type == 'disc_diff':
+        print('Building Disc-Diff UNet model...')
+        assert args.use_T2W is True
+        return UNet_DisC_Diff(
+            image_size      = img_size,
+            hr_condition    = args.use_T2W
+        )
     else:
         raise ValueError(f"Unknown UNet type: {type}")
     

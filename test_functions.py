@@ -262,10 +262,11 @@ def create_plot(batch_size, use_T2W, num_rep=None, offset=False, add_error=False
 
         titles += ["High res (Ground truth)"]
 
-        if add_error and not avg_std:
+        if add_error:
             titles += ["Uncertainty-Error Correlation"]
     
     ncols = len(titles)
+    print(titles)
 
     fig, axes = plt.subplots(nrows=batch_size, ncols=ncols, figsize=(3*ncols, 3*batch_size))
     for j, t in enumerate(titles):
@@ -332,6 +333,8 @@ def visualize_batch(
     #         lowres[i] = cv2.resize(lowres[i], (full_size,full_size), interpolation=cv2.INTER_LINEAR)
     #     lowres    = lowres.to(device)
     
+    t2w_input = get_t2w_input(batch, device)
+    
     for i in range(batch_size):
         count = 0
         # Column 0: lowres input
@@ -340,15 +343,12 @@ def visualize_batch(
         if num_rep is None:
             # Column 1 (optional): T2W input
             if use_T2W:
-                count += 1
+                count += 1                    
                 if "T2W_embed" in batch:
-                    # If using latent embedding, decode for plotting (if applicable)
-                    if vae is not None:
-                        t2w_input = decode_latent(t2w_input, vae)[:,0,:,:]
-                    plot_image(t2w_input[i], fig, axes, i, 1)
-                else:
                     plot_image(t2w_input[0][i], fig, axes, i, 1)
-            
+                else:
+                    plot_image(t2w_input[i], fig, axes, i, 1)
+                    
             # Column 2: High res (SR Output)
             plot_image(pred[i], fig, axes, i, count+1)
             
@@ -359,6 +359,11 @@ def visualize_batch(
                 count += 2
                 
         else:
+            if use_T2W:
+                count += 1
+                # Add t2w_embed stuff?
+                plot_image(t2w_input[i], fig, axes, i, 1)
+                    
             # Columns (x num_rep): High res (SR Outputs)
             for rep in range(num_rep):
                 count += 1
