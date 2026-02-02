@@ -114,7 +114,6 @@ def extract(a, t, x_shape):
     reshaped = out.reshape(b, *((1,) * (len(x_shape) - 1)))
     return reshaped
 
-
 def linear_beta_schedule(timesteps):
     """
     linear schedule, proposed in original ddpm paper
