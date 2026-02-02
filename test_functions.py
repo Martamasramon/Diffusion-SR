@@ -88,7 +88,7 @@ def run_diffusion(diffusion, lowres, t2w_input, controlnet=False, perform_uq=Fal
         return diffusion.sample(lowres, **kwargs)
 
 
-def get_target_prediction(batch, model_output):
+def get_target_prediction(batch, model_output, vae=None):
     """
     Determine which target to use for evaluation and whether to transform the model output.
     - If 'ADC_target' exists: use it as target and downsample model_output to match.
@@ -97,12 +97,44 @@ def get_target_prediction(batch, model_output):
     if 'ADC_target' in batch.keys():
         # Build transform to match target resolution / shape
         pred_transform  = downsample_transform(batch['ADC_target'].shape[1])
-        return batch['ADC_target'], pred_transform(model_output)
+        target     = batch['ADC_target']
+        prediction = pred_transform(model_output)
     else:
-        return batch['ADC_input'], model_output
+        target      = batch['ADC_input']
+        prediction  = model_output
+    
+    if vae is not None:
+        prediction = decode_latent(prediction, vae)[:,0,:,:]
+        
+    return target, prediction
 
+def get_batch_images(dataloader, device, use_T2W, vae=None, batch=None):
+    """
+    Fetch one batch from dataloader and move relevant tensors to device.
+    Optionally:
+      - encode lowres (and t2w) into latent space using a VAE
+      - collect T2W conditioning if requested
+    Returns:
+      highres, lowres, t2w_input, batch
+    """
+    if batch is None:
+        batch   = next(iter(dataloader))
+    highres = batch['ADC_input'].to(device)
+    lowres  = batch['ADC_condition'].to(device)
+    
+    if vae is not None:
+        lowres, _ = encode_latent(lowres, vae)
+        
+    if use_T2W:
+        t2w_input = get_t2w_input(batch, device)
+        if vae is not None:
+            t2w_input,_ = encode_latent(t2w_input, vae)
+    else:
+        t2w_input = None
+    
+    return highres, lowres, t2w_input, batch   
 
-def evaluate_results(diffusion, dataloader, device, batch_size, use_T2W=False, controlnet=False):
+def evaluate_results(diffusion, dataloader, device, batch_size, use_T2W=False, controlnet=False, vae=None):
     """
     Iterate over dataloader and compute average MSE/PSNR/SSIM over all samples.
     """
@@ -110,14 +142,13 @@ def evaluate_results(diffusion, dataloader, device, batch_size, use_T2W=False, c
     
     for batch in dataloader:
         # Base conditioning input, Optional T2W for the diffusion model
-        adc_condition = batch['ADC_condition'].to(device)
-        t2w_input     = get_t2w_input(batch, device) if use_T2W else None
+        _, lowres, t2w_input, _ = get_batch_images(dataloader, device, use_T2W, vae, batch)
 
         # Sample SR output
-        model_output  = run_diffusion(diffusion, adc_condition, t2w_input, controlnet)
+        model_output  = run_diffusion(diffusion, lowres, t2w_input, controlnet)
                     
         # Align prediction/target if necessary
-        target, prediction = get_target_prediction(batch, model_output)
+        target, prediction = get_target_prediction(batch, model_output, vae)
         target = target.to(device)
 
         # Accumulate per-image metrics
@@ -195,7 +226,7 @@ def plot_uq_error_corr(pred, highres, pred_std, fig, axes, i=None, j=None):
     axes[i, j].scatter(pred_std_flat, err_flat, alpha=0.5)
     axes[i, j].set_xlabel('Predicted Std Deviation')
     axes[i, j].set_ylabel('Absolute Error')
-    axes[i, j].set_title(f'Uncertainty-Error Correlation (Spearman $\rho$={rho:.2f})')
+    axes[i, j].set_title(f'Uncertainty-Error Correlation (Spearman ρ={rho:.2f})')
 
 
 def create_plot(batch_size, use_T2W, num_rep=None, offset=False, add_error=False, avg_std=False):
@@ -241,33 +272,25 @@ def create_plot(batch_size, use_T2W, num_rep=None, offset=False, add_error=False
         axes[0, j].set_title(t)
         
     return fig, axes, ncols
+     
 
-
-def get_batch_images(dataloader, device, use_T2W, vae=None, ):
-    """
-    Fetch one batch from dataloader and move relevant tensors to device.
-    Optionally:
-      - encode lowres (and t2w) into latent space using a VAE
-      - collect T2W conditioning if requested
-    Returns:
-      highres, lowres, t2w_input, batch
-    """
-    batch   = next(iter(dataloader))
-    highres = batch['ADC_input'].to(device)
-    lowres  = batch['ADC_condition'].to(device)
-    
+def decode_all_UQ(pred,vae):
     if vae is not None:
-        lowres, _ = encode_latent(lowres, vae)
-        
-    if use_T2W:
-        t2w_input = get_t2w_input(batch, device)
-        if vae is not None:
-            t2w_input,_ = encode_latent(t2w_input, vae)
-    else:
-        t2w_input = None
-    
-    return highres, lowres, t2w_input, batch        
+        decoded_x0 = []
+        for i in range(pred.shape[1]):
+            decoded_x0_sample = decode_latent(pred[:,i,:,:,:], vae)[:,0,:,:]
+            decoded_x0.append(decoded_x0_sample)
+        decoded_x0 = torch.stack(decoded_x0, dim=1)  # Shape: (batch_size, num_reruns, H, W)
 
+        pred_mean = decoded_x0.mean(dim=1)  # Use mean prediction for visualization; shape: (batch_size, H, W)
+        pred_std  = decoded_x0.std(dim=1)   # Use std for uncertainty maps; shape: (batch_size, H, W)
+    
+    else:
+        decoded_x0 = pred 
+        pred_mean = pred.mean(dim=1)  # Use mean prediction for visualization; shape: (batch_size, H, W)
+        pred_std  = pred.std(dim=1)
+    
+    return decoded_x0, pred_mean, pred_std
 
 def visualize_batch(
     diffusion, dataloader, batch_size, device,
@@ -281,14 +304,25 @@ def visualize_batch(
       - optional error map
       - highres ground truth
     """
-    avg_std = False if not perform_uq else True
-    num_rep = num_rep if perform_uq else None
+    if num_rep is not None:
+        avg_std, add_error = True, True    
+    else:
+        avg_std = False    
+
     fig, axes, ncols = create_plot(batch_size, use_T2W, num_rep=num_rep, add_error=add_error, avg_std=avg_std)
     highres, lowres, t2w_input, batch = get_batch_images(dataloader, device, use_T2W, vae)
     
     # Run model sampling
     if diffusion is not None:
         pred = run_diffusion(diffusion, lowres, t2w_input, controlnet, perform_uq, num_rep)
+        
+        if perform_uq:
+            decoded_x0, pred_mean, pred_std = decode_all_UQ(pred, vae)
+        elif vae is not None:
+            pred = decode_latent(pred, vae)[:,0,:,:]
+    
+    if vae is not None:
+        lowres = decode_latent(lowres, vae)[:,0,:,:]
         
     # else:
     #     lowres    = batch['ADC_condition']
@@ -298,79 +332,48 @@ def visualize_batch(
     #         lowres[i] = cv2.resize(lowres[i], (full_size,full_size), interpolation=cv2.INTER_LINEAR)
     #     lowres    = lowres.to(device)
     
-    # Optional: decode from latent to pixel space for visualization
-    pred, pred_std = None, None
-    decoded_x0_samples = []
-    if vae is not None:
-        if diffusion is not None:
-            if not perform_uq:
-                pred = decode_latent(pred, vae)
-            else:
-                # Decode each sample in the UQ output
-                for i in range(pred.shape[1]):
-                    decoded_x0_sample = decode_latent(pred[:,i,:,:,:], vae)
-                    decoded_x0_samples.append(decoded_x0_sample)
-                decoded_x0_samples = torch.stack(decoded_x0_samples, dim=1)  # Shape: (batch_size, num_reruns, C, H, W)
-                pred = decoded_x0_samples.mean(dim=1)  # Use mean prediction for visualization; shape: (batch_size, C, H, W)
-                pred_std = decoded_x0_samples.std(dim=1)  # Use std for uncertainty maps; shape: (batch_size, C, H, W)
-        else:
-            pred = decode_latent(lowres, vae)
-        pred   = pred[:,0,:,:]
-        if pred_std is not None:
-            pred_std = pred_std[:,0,:,:]
-        lowres = batch['ADC_condition'].to(device)
-    
-    elif perform_uq:
-        for i in range(pred.shape[1]):
-            decoded_x0_sample = pred[:,i,:,:,:]
-            decoded_x0_samples.append(decoded_x0_sample)
-        decoded_x0_samples = torch.stack(decoded_x0_samples, dim=1)  # Shape: (batch_size, num_reruns, C, H, W)
-        pred = decoded_x0_samples.mean(dim=1)  # Use mean prediction for visualization; shape: (batch_size, C, H, W)
-        pred_std = decoded_x0_samples.std(dim=1)  # Use std for uncertainty maps; shape: (batch_size, C, H, W)
-    
     for i in range(batch_size):
         count = 0
         # Column 0: lowres input
         plot_image(lowres[i], fig, axes, i, 0)
-        # Column 1 (optional): T2W input
-        if use_T2W:
-            count += 1
-            if "T2W_embed" in batch:
-                # If using latent embedding, decode for plotting (if applicable)
-                if vae is not None:
-                    t2w_input = decode_latent(t2w_input, vae)[:,0,:,:]
-                plot_image(t2w_input[i], fig, axes, i, 1)
-            else:
-                plot_image(t2w_input[0][i], fig, axes, i, 1)
-
-        # SR output column
-        if not perform_uq:
-            count += 1
-            plot_image(pred[i], fig, axes, i, count)
-
-        if avg_std and perform_uq:
-            # Repetition columns: SR outputs
+        
+        if num_rep is None:
+            # Column 1 (optional): T2W input
+            if use_T2W:
+                count += 1
+                if "T2W_embed" in batch:
+                    # If using latent embedding, decode for plotting (if applicable)
+                    if vae is not None:
+                        t2w_input = decode_latent(t2w_input, vae)[:,0,:,:]
+                    plot_image(t2w_input[i], fig, axes, i, 1)
+                else:
+                    plot_image(t2w_input[0][i], fig, axes, i, 1)
+            
+            # Column 2: High res (SR Output)
+            plot_image(pred[i], fig, axes, i, count+1)
+            
+            # Column 3 (optional): Error
+            if add_error:
+                plot_image(pred[i], fig, axes, i, count+2, False)
+                plot_error(pred[i], highres[i], fig, axes, i, count+2)
+                count += 2
+                
+        else:
+            # Columns (x num_rep): High res (SR Outputs)
             for rep in range(num_rep):
                 count += 1
-                plot_image(decoded_x0_samples[i][rep], fig, axes, i, count)
-            # mean/std columns (optional; only if UQ performed)
-            plot_image(pred[i], fig, axes, i, count+1)
+                plot_image(decoded_x0[i][rep], fig, axes, i, count)
+
+            plot_image(pred_mean[i], fig, axes, i, count+1)
             plot_image(pred_std[i],  fig, axes, i, count+2, kind='std')
             count += 2
 
-        # Error column (optional)
-        if add_error:
-            plot_image(pred[i], fig, axes, i, count+1, False)
-            plot_error(pred[i], highres[i], fig, axes, i, count+2)
-            count += 2
         # Ground truth (last column)
         plot_image(highres[i], fig, axes, i, count+1)
-        count += 1
-
-        if add_error and not avg_std:
-            # Plot UQ error correlation if applicable
-            plot_uq_error_corr(pred[i], highres[i], pred_std[i], fig, axes, i, count+1)
-            count += 1
+    
+        # UQ error column (optional)
+        if add_error and num_rep is not None:
+            plot_uq_error_corr(pred_mean[i], highres[i], pred_std[i], fig, axes, i, ncols-1)
     
     fig.tight_layout(pad=0.25)
     save_path = os.path.join('./test_images', output_name+'.jpg')

@@ -4,7 +4,8 @@ from torch.utils.data import DataLoader
 import sys
 sys.path.append('../models')
 from Diffusion       import Diffusion
-from UNet_Basic      import UNet_Basic
+from UNet_Basic      import UNet_Basic 
+from UNet_DisC_Diff  import UNet_Basic as UNet_Basic_DiscDiff
 from UNet_Attn       import UNet_Attn
 from load_controlnet import load_pretrained_with_controlnet
 
@@ -31,19 +32,26 @@ def get_img_size(args, type='basic'):
     return img_size
     
     
-def build_UNet(args, type='basic', img_channels=1):
+def build_UNet(args, type='basic', img_channels=1, discdiff=False):
     img_size = get_img_size(args, type)
     
     if type == 'basic' or type == 'latent':
         print('Building basic UNet model...')
-        return UNet_Basic(
-            dim             = img_size,
-            dim_mults       = tuple(args.dim_mults),
-            self_condition  = args.self_condition,
-            controlnet      = args.controlnet,
-            concat_t2w      = args.use_T2W,
-            img_channels    = img_channels
-        )
+        if discdiff:
+            return UNet_Basic_DiscDiff(
+                image_size      = img_size,
+                hr_condition    = args.use_T2W
+            )
+        else:
+            return UNet_Basic(
+                dim             = img_size,
+                dim_mults       = tuple(args.dim_mults),
+                self_condition  = args.self_condition,
+                controlnet      = args.controlnet,
+                concat_t2w      = args.use_T2W,
+                img_channels    = img_channels
+            )
+        
     elif type == 'attn':
         print('Building attention UNet model...')
         return UNet_Attn(
