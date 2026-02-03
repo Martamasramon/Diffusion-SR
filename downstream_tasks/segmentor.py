@@ -191,8 +191,8 @@ class Segmentor:
         # Preprocessing: load -> channel first -> resample -> orient -> intensity scaling
         self.input_transform = Compose(
             [
-                LoadImage(image_only=False),  # keep metadata (affine, etc.)
-                EnsureChannelFirst(),
+                LoadImage(image_only=True),  # keep metadata (affine, etc.)
+                EnsureChannelFirst(channel_dim="no_channel"),
                 Spacing(pixdim=(0.5, 0.5, 0.5), mode=GridSampleMode.BILINEAR),
                 Orientation(axcodes="RAS"),
                 ScaleIntensity(minv=0, maxv=1),

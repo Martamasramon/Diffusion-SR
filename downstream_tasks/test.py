@@ -5,7 +5,7 @@ import torch
 import nibabel as nib
 
 from image_to_nifti import PatientToNifti, save_mask_as_nifti        
-from segmentor_prostate import Segmentor          
+from segmentor import Segmentor          
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -25,11 +25,14 @@ def main():
         item = ds[i]  # triggers NIfTI caching if needed
         pid  = item["patient_id"]
 
+    ### ERROR - IT'S USING ADC! NOT T2W!
         # Prefer T2W_HR if available, else ADC_HR
         if "T2W_HR" in item and item["T2W_HR"] is not None:
+            print('t2w')
             vol_path = item["T2W_HR"]
             mod = "T2W_HR"
         else:
+            print('adc')
             vol_path = item["ADC_HR"]
             mod = "ADC_HR"
 

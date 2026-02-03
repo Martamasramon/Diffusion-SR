@@ -168,7 +168,7 @@ class PatientToNifti(Dataset):
                 output[key] = str(out_nii)
                 continue
         
-            slice_paths = self._resolve_slice_paths(patient_id)
+            slice_paths = self._resolve_slice_paths(patient_id, mod_key=key)
             vol         = self._build_volume(slice_paths)
             nib.save(nib.Nifti1Image(vol, affine=self.affine), out_nii)
             output[key] = str(out_nii)
