@@ -160,6 +160,22 @@ def evaluate_results(diffusion, dataloader, device, batch_size, use_T2W=False, c
     print(f'Average PSNR: {np.mean(psnr_list):.2f}')
     print(f'Average SSIM: {np.mean(ssim_list):.4f}')
 
+def uq_calibration(x0_samples, highres):
+    '''
+    Compute the coverage of the 5-95% prediction interval.
+
+    :param x0_samples: Tensor of shape (num_reruns, C, H, W) containing multiple rerun samples from the conditional predictive distribution. x0_samples are individial samples within a batch.
+    :param highres: Tensor of shape (C, H, W) containing the ground truth high-resolution image.
+    :return: Coverage value (float) representing the proportion of pixels in highres that fall
+    '''
+    lower_5 = torch.quantile(x0_samples, 0.05, dim=0) # lower 5th percentile; shape (C, H, W)
+    upper_95 = torch.quantile(x0_samples, 0.95, dim=0) # upper 95th percentile; shape (C, H, W)
+
+    within_interval = ((highres >= lower_5) & (highres <= upper_95)).float()
+    coverage = within_interval.mean().item()  # Proportion of pixels within the interval
+
+    return coverage
+
 
 def format_image(x):
     """
@@ -212,24 +228,78 @@ def plot_uq_error_corr(pred, highres, pred_std, fig, axes, i=None, j=None):
       - Absolute error between pred and highres
       - Predicted std deviation map
       - Correlation scatter plot between error and predicted std
+      - Spearman correlation coefficient
+      - Overlay median error per predicted std quantile
     """
-    err = np.abs(format_image(pred) - format_image(highres))
     pred_std_np = format_image(pred_std)
+    err = np.abs(format_image(pred) - format_image(highres))
 
     # Scatter plot data
-    err_flat     = err.flatten()
-    pred_std_flat = pred_std_np.flatten()
+    pred_std_flat = np.asarray(pred_std_np.flatten())
+    err_flat     = np.asarray(err.flatten())
 
-    rho, p = spearmanr(err_flat, pred_std_flat)
+    rho, p = spearmanr(pred_std_flat, err_flat)
 
     # Correlation scatter plot
     axes[i, j].scatter(pred_std_flat, err_flat, alpha=0.5)
     axes[i, j].set_xlabel('Predicted Std Deviation')
     axes[i, j].set_ylabel('Absolute Error')
-    axes[i, j].set_title(f'Uncertainty-Error Correlation (Spearman ρ={rho:.2f})')
+
+    # Overlay median error per predicted std quantile
+    n_bins = 10
+    quantiles = np.quantile(pred_std_flat, np.linspace(0, 1, n_bins + 1))
+
+    bin_centers = []
+    bin_error_median = []
+
+    for i in range(n_bins):
+        mask = (pred_std_flat >= quantiles[i]) & (pred_std_flat < quantiles[i + 1])
+        if np.any(mask):
+            bin_centers.append(pred_std_flat[mask].mean())
+            bin_error_median.append(np.median(err_flat[mask]))
+
+    # Plot median error line
+    axes[i, j].plot(
+        bin_centers,
+        bin_error_median,
+        color="red",
+        alpha=0.8,
+        marker="o",
+        linewidth=2,
+        # label="Median error per std quantile"
+    )
+
+    # Annotate Spearman correlation coefficient at top-right in the plot
+    axes[i, j].text(
+        0.975, 0.975,
+        rf"ρ={rho:.2f}",
+        transform=axes[i, j].transAxes,
+        ha='right',
+        va='top',
+        bbox=dict(
+            boxstyle="round,pad=0.3",
+            facecolor="none",
+            alpha=0.25,
+            edgecolor="black"
+        )
+    )
+    # axes[i, j].set_title(f'Uncertainty-Error Correlation (Spearman ρ={rho:.2f})')
+
+def plot_uq_t2w_overlay(t2w_img, pred_std, fig, axes, i, j, colorbar=True):
+    """
+    Plot T2W image with predicted std deviation overlay.
+    """
+    t2w_np     = format_image(t2w_img)
+    pred_std_np = format_image(pred_std)
+
+    axes[i, j].imshow(t2w_np, cmap='gray', vmin=0, vmax=1)
+    im_overlay = axes[i, j].imshow(pred_std_np, cmap='hot', vmin=0, vmax=0.5, alpha=0.6)
+    if colorbar:
+        fig.colorbar(im_overlay, ax=axes[i, j])
+    axes[i, j].axis('off')
 
 
-def create_plot(batch_size, use_T2W, num_rep=None, offset=False, add_error=False, avg_std=False):
+def create_plot(batch_size, use_T2W, num_rep=None, offset=False, add_error=False, avg_std=False, uq_t2w_overlay=False):
     """
     Create a figure grid and set titles for the first row.
     Supports three modes:
@@ -261,6 +331,9 @@ def create_plot(batch_size, use_T2W, num_rep=None, offset=False, add_error=False
             titles += ["Average Output", "Std Output"]
 
         titles += ["High res (Ground truth)"]
+
+        if uq_t2w_overlay:
+            titles += ["T2W with Uncertainty Overlay"]
 
         if add_error:
             titles += ["Uncertainty-Error Correlation"]
@@ -308,9 +381,11 @@ def visualize_batch(
     if num_rep is not None:
         avg_std, add_error = True, True    
     else:
-        avg_std = False    
+        avg_std = False
 
-    fig, axes, ncols = create_plot(batch_size, use_T2W, num_rep=num_rep, add_error=add_error, avg_std=avg_std)
+    uq_t2w_overlay = False # Set to False for now; could be set to True if the overlay plot is desired after enabling T2W input
+
+    fig, axes, ncols = create_plot(batch_size, use_T2W, num_rep=num_rep, add_error=add_error, avg_std=avg_std, uq_t2w_overlay=uq_t2w_overlay)
     highres, lowres, t2w_input, batch = get_batch_images(dataloader, device, use_T2W, vae)
     
     # Run model sampling
@@ -375,10 +450,18 @@ def visualize_batch(
 
         # Ground truth (last column)
         plot_image(highres[i], fig, axes, i, count+1)
+
+        # T2W with uncertainty overlay (optional)
+        if use_T2W and uq_t2w_overlay:
+            plot_uq_t2w_overlay(t2w_input[i], pred_std[i], fig, axes, i, ncols-2)
     
         # UQ error column (optional)
         if add_error and num_rep is not None:
             plot_uq_error_corr(pred_mean[i], highres[i], pred_std[i], fig, axes, i, ncols-1)
+
+        # # Calibration coverage of gt HR ADC within x0_samples (optional)
+        # coverage_x0_gt = uq_calibration(decoded_x0[i], highres[i])
+        # print(f"Batch SR Image {i}: Coverage of 5-95% PI: {coverage_x0_gt*100:.2f}%")
     
     fig.tight_layout(pad=0.25)
     save_path = os.path.join('./test_images', output_name+'.jpg')
