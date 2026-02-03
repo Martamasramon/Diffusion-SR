@@ -22,8 +22,6 @@ from network_modules_DisC_Diff import (
     convert_module_to_f16, 
     convert_module_to_f32
 )
-
-
         
 class UNet_Basic(nn.Module):
     """
@@ -53,6 +51,7 @@ class UNet_Basic(nn.Module):
             num_res_blocks          = 2,
             dropout                 = 0,
             conv_resample           = True,
+            self_condition          = True, # False if latent!
             dims                    = 2,
             use_checkpoint          = False,
             use_fp16                = False,
@@ -79,11 +78,11 @@ class UNet_Basic(nn.Module):
         self.num_head_channels  = num_head_channels
         self.num_heads_upsample = num_heads
         self.dims               = dims
+        self.self_condition     = self_condition
         
         # Make compatible with diffusion script
         self.input_img_channels = 1
         self.mask_channels      = 1
-        self.self_condition     = True
         self.controlnet         = None
         self.concat_t2w         = hr_condition
 
@@ -256,6 +255,10 @@ class UNet_Basic(nn.Module):
 
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
         
+        if self.self_condition:
+            x_self_cond = default(x_self_cond, lambda: torch.zeros_like(x))
+            x = torch.cat([x, x_self_cond], dim=1)
+        
         # concatenate inputs 
         if t2w is not None:
             h = torch.cat([x, low_res, t2w], dim=1).type(self.dtype)
@@ -347,9 +350,6 @@ class UNet_DisC_Diff(UNet_Basic):
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
         h1 = x.type(self.dtype)
         h2 = low_res.type(self.dtype)
-
-        # print(torch.count_nonzero(t2w))
-        # has_t2w = (torch.count_nonzero(t2w) > 0)
         h3 = t2w.type(self.dtype)
 
         for idx in range(len(self.input_blocks)):
@@ -382,5 +382,3 @@ class UNet_DisC_Diff(UNet_Basic):
         h = h.type(x.dtype)
 
         return self.out(h)
-        # return com_h1, com_h2, com_h3, dist_h1, dist_h2, dist_h3, self.out(h)
-
