@@ -35,7 +35,7 @@ def get_img_size(args):
     return img_size
     
     
-def build_UNet(args, img_channels=1, discdiff=False):
+def build_UNet(args, img_channels=1):
     img_size = get_img_size(args)
     
     if args.unet_type == 'basic':
@@ -44,22 +44,12 @@ def build_UNet(args, img_channels=1, discdiff=False):
             image_size      = img_size,
             hr_condition    = args.use_T2W
         )
-    elif args.unet_type == 'basic_old':
-        print('Building basic UNet model...')
+    elif args.unet_type == 'basic_old' or args.unet_type == 'latent':
+        print('Building basic UNet (old) model...')
         return UNet_Basic(
             dim             = img_size,
             dim_mults       = tuple(args.dim_mults),
             self_condition  = args.self_condition,
-            controlnet      = args.controlnet,
-            concat_t2w      = args.use_T2W,
-            img_channels    = img_channels
-        )
-    elif args.unet_type == 'latent':
-        print('Building basic UNet model...')
-        return UNet_Basic(
-            dim             = img_size,
-            dim_mults       = tuple(args.dim_mults),
-            self_condition  = False,
             controlnet      = args.controlnet,
             concat_t2w      = args.use_T2W,
             img_channels    = img_channels
