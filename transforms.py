@@ -155,7 +155,7 @@ class Transforms():
         return {
             'ADC_input'    : self.get_highres(),
             'ADC_condition': self.get_lowres(),
-            'T2W_condition': self.get_t2w()
+            'T2W':           self.get_t2w()
         }
         
 class TransformsOffsetT2W(Transforms):
@@ -200,7 +200,7 @@ class TransformsUpsample(Transforms):
         return {
             'ADC_input'    : self.get_upsampled_bicubic(),
             'ADC_condition': self.get_upsampled_nearest(),
-            'T2W_condition': self.get_t2w(),
+            'T2W':           self.get_t2w(),
             'ADC_target'   : self.get_adc(),
         }
         
@@ -231,7 +231,7 @@ class TransformsLowField(Transforms):
         return {
             'ADC_condition': self.get_lowres(),
             'ADC_input':     self.get_highres(),
-            'T2W_condition': self.get_t2w()
+            'T2W':           self.get_t2w(),
         }
 
 def get_transforms(dims, image_size, downsample, type=None, t2w_offset=None):
