@@ -177,7 +177,7 @@ class Diffusion(nn.Module):
 
     def model_predictions(self, x, low_res, t, x_self_cond = None, control=None, t2w=None, clip_x_start = False, rederive_pred_noise = False):
         model_output = self.model.forward(x, low_res, t, x_self_cond, control=control, t2w=t2w)
-        maybe_clip = partial(torch.clamp, min = -1., max = 1.) if clip_x_start else identity
+        maybe_clip  = partial(torch.clamp, min = -1., max = 1.) if clip_x_start else identity
 
         if self.objective == 'pred_noise':
             pred_noise = model_output
@@ -292,7 +292,7 @@ class Diffusion(nn.Module):
 
         if self.is_ddim_sampling and perform_uq and num_rep:
 
-            seeds = torch.randint(0, 100000, (num_rep,), device=self.device)
+            seeds = torch.randint(0, 1e6, (num_rep,), device=self.device)
             imgs_pred = []
 
             for seed in seeds:
