@@ -62,16 +62,15 @@ class MyDataset(Dataset):
 
     def __getitem__(self, idx):
         item   = self.img_dict.iloc[idx]
-        img    = Image.open(f'{self.img_path}/ADC{self.masked}/{item["SID"]}').convert('L')
         sample = {}
         
         if self.use_T2W:
+            # t2w = Image.new('L', t2w.size, 0) # Test performance with blank image
+            t2w = Image.open(f'{self.img_path}/T2W{self.masked}/{item["SID"]}').convert('L')
+            sample['T2W_input'] = self.transforms['T2W'](t2w)
             if self.processing == 'lowfield':
-                t2w = Image.open(f'{self.img_path}/T2W_lowfield/{item["SID"]}').convert('L')
-            else:
-                t2w = Image.open(f'{self.img_path}/T2W{self.masked}/{item["SID"]}').convert('L')
-                # t2w = Image.new('L', t2w.size, 0) # Test performance with blank image
-            sample['T2W_condition'] = self.transforms['T2W_condition'](t2w)
+                t2w = Image.open(f'{self.img_path}/T2W_lowfield/{item["SID"]}').convert('L')                
+            sample['T2W_condition'] = self.transforms['T2W'](t2w)
             
             if self.data_type == 'val':
                 sample['T2W_path'] = f'{self.img_path}/T2W{self.masked}/{item["SID"]}'
@@ -79,14 +78,13 @@ class MyDataset(Dataset):
         if self.t2w_embed:
             sample['T2W_embed'] = self.t2w_model.get_all_embeddings(sample['T2W_condition'].unsqueeze(0))
         
-        sample['ADC_condition'] = self.transforms['ADC_condition'](img)
-        sample['ADC_input']     = self.transforms['ADC_input'](img)
-        
-        if self.processing == 'lowfield':
-            sample['ADC_condition'] = self.transforms['ADC_condition'](Image.open(f'{self.img_path}/ADC_lowfield/{item["SID"]}').convert('L'))  
-        
+        img = Image.open(f'{self.img_path}/ADC{self.masked}/{item["SID"]}').convert('L')
+        sample['ADC_input'] = self.transforms['ADC_input'](img)
         if 'ADC_target' in self.transforms.keys():
-            sample['ADC_target']    = self.transforms['ADC_target'](img)  
+            sample['ADC_target'] = self.transforms['ADC_target'](img)   
+        if self.processing == 'lowfield':
+            img = Image.open(f'{self.img_path}/ADC_lowfield/{item["SID"]}').convert('L')
+        sample['ADC_condition'] = self.transforms['ADC_condition'](img)
                     
         #### Force T2W usage by sometimes deleting DWI input
         if self.data_type == 'train' and torch.rand(()) < self.blank_prob:
