@@ -6,6 +6,7 @@ parser.add_argument('--img_size',           type=int,  default=64)
 parser.add_argument('--down',               type=int,  default=2)
 parser.add_argument('--self_condition',     type=bool, default=True)
 parser.add_argument('--dim_mults',          type=int,  nargs='+', default=[1, 2, 4, 8])
+parser.add_argument('--unet_type',          type=str,  default='basic')
 # Diffusion
 parser.add_argument('--timesteps',          type=int,  default=1000)
 parser.add_argument('--sampling_timesteps', type=int,  default=150)

@@ -14,8 +14,9 @@ from VAE import load_vae
 def main():
     accelerator = Accelerator(split_batches=True, mixed_precision='no')
     
-    model     = build_UNet(args, type='latent', img_channels=3)
-    diffusion = build_diffusion(args, model, type='latent', auto_normalize=False)
+    args.unet_type == 'latent'
+    model     = build_UNet(args, img_channels=3)
+    diffusion = build_diffusion(args, model, auto_normalize=False)
     
     if args.checkpoint:
         device    = set_device()

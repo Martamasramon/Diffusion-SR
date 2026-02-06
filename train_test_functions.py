@@ -3,17 +3,19 @@ from torch.utils.data import DataLoader
 
 import sys
 sys.path.append('../models')
-from Diffusion       import Diffusion
+from Diffusion           import Diffusion
+from Diffusion_MultiTask import Diffusion_MultiTask
 from UNet_Basic      import UNet_Basic 
 from UNet_DisC_Diff  import UNet_DisC_Diff
 from UNet_DisC_Diff  import UNet_Basic as UNet_Basic_DiscDiff
 from UNet_Attn       import UNet_Attn
+from UNet_MultiTask  import UNet_MultiTask
 from load_controlnet import load_pretrained_with_controlnet
 
 import sys
 sys.path.append('../')
 from dataset         import MyDataset
-from trainer_class   import Trainer
+from trainer_class   import Trainer, Trainer_MultiTask
 
 folder = '/cluster/project7/backup_masramon/IQT/'
  
@@ -22,10 +24,10 @@ def set_device():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     return device
 
-def get_img_size(args, type='basic'):
+def get_img_size(args):
     if args.upsample:
         img_size = args.img_size*args.down
-    elif type=='latent':
+    elif args.unet_type =='latent':
         img_size = args.latent_size
     else:
         img_size = args.img_size
@@ -33,27 +35,36 @@ def get_img_size(args, type='basic'):
     return img_size
     
     
-def build_UNet(args, type='basic', img_channels=1, discdiff=False):
-    img_size = get_img_size(args, type)
+def build_UNet(args, img_channels=1, discdiff=False):
+    img_size = get_img_size(args)
     
-    if type == 'basic' or type == 'latent':
+    if args.unet_type == 'basic':
+        print('Building basic UNet (DiscDiff) model...')
+        return UNet_Basic_DiscDiff(
+            image_size      = img_size,
+            hr_condition    = args.use_T2W
+        )
+    elif args.unet_type == 'basic_old':
         print('Building basic UNet model...')
-        if discdiff:
-            return UNet_Basic_DiscDiff(
-                image_size      = img_size,
-                hr_condition    = args.use_T2W
-            )
-        else:
-            return UNet_Basic(
-                dim             = img_size,
-                dim_mults       = tuple(args.dim_mults),
-                self_condition  = args.self_condition,
-                controlnet      = args.controlnet,
-                concat_t2w      = args.use_T2W,
-                img_channels    = img_channels
-            )
-        
-    elif type == 'attn':
+        return UNet_Basic(
+            dim             = img_size,
+            dim_mults       = tuple(args.dim_mults),
+            self_condition  = args.self_condition,
+            controlnet      = args.controlnet,
+            concat_t2w      = args.use_T2W,
+            img_channels    = img_channels
+        )
+    elif args.unet_type == 'latent':
+        print('Building basic UNet model...')
+        return UNet_Basic(
+            dim             = img_size,
+            dim_mults       = tuple(args.dim_mults),
+            self_condition  = False,
+            controlnet      = args.controlnet,
+            concat_t2w      = args.use_T2W,
+            img_channels    = img_channels
+        )
+    elif args.unet_type == 'attn':
         print('Building attention UNet model...')
         return UNet_Attn(
         dim             = img_size,
@@ -62,30 +73,52 @@ def build_UNet(args, type='basic', img_channels=1, discdiff=False):
         use_T2W         = args.use_T2W,
         img_channels    = img_channels
     )
-    elif type == 'disc_diff':
+    elif args.unet_type == 'disc_diff':
         print('Building Disc-Diff UNet model...')
         assert args.use_T2W is True
         return UNet_DisC_Diff(
             image_size      = img_size,
             hr_condition    = args.use_T2W
         )
+    elif args.unet_type == 'multitask':
+        print('Building MultiTask model...')
+        assert args.use_T2W is True     
+        return UNet_MultiTask(
+            UNet_Basic_DiscDiff(image_size = img_size),
+            UNet_Basic_DiscDiff(image_size = img_size),
+        )  
     else:
         raise ValueError(f"Unknown UNet type: {type}")
     
  
-def build_diffusion(args, model, type='basic', auto_normalize=True):
-    img_size = get_img_size(args, type)
+def build_diffusion(args, model, auto_normalize=True):
+    img_size = get_img_size(args)
 
-    return Diffusion(
-        model,
-        image_size          = img_size,
-        timesteps           = args.timesteps,
-        sampling_timesteps  = args.sampling_timesteps,
-        beta_schedule       = args.beta_schedule,
-        loss_weights        = {'mse':1, 'ssim':0, 'perct':args.perct_λ},
-        auto_normalize      = auto_normalize,
-        objective           = args.objective
-    )
+    if args.unet_type == 'multitask':
+        print('Building MultiTask Diffusion model...')
+        return Diffusion_MultiTask(
+            model,
+            image_size          = img_size,
+            timesteps           = args.timesteps,
+            sampling_timesteps  = args.sampling_timesteps,
+            beta_schedule       = args.beta_schedule,
+            loss_weights        = {'mse':1, 'ssim':0, 'perct':args.perct_λ},
+            loss_weights_t2w    = {'mse':1, 'ssim':0, 'perct':args.perct_λ},
+            auto_normalize      = auto_normalize,
+            objective           = args.objective
+        )
+    else:
+        print('Building Diffusion model...')
+        return Diffusion(
+            model,
+            image_size          = img_size,
+            timesteps           = args.timesteps,
+            sampling_timesteps  = args.sampling_timesteps,
+            beta_schedule       = args.beta_schedule,
+            loss_weights        = {'mse':1, 'ssim':0, 'perct':args.perct_λ},
+            auto_normalize      = auto_normalize,
+            objective           = args.objective
+        )
     
 def remap_checkpoints(state, target_model):
     """
@@ -152,28 +185,49 @@ def build_trainer(args,diffusion,train_dataloader,test_dataloader,accelerator,ru
         print(image_loss_weights)
     else:
         image_loss_weights = None
-        
-    trainer = Trainer(
-        diffusion,
-        train_dataloader,
-        test_dataloader,
-        accelerator,
-        use_t2w             = args.controlnet | args.use_T2W,
-        finetune_controlnet = args.controlnet,
-        batch_size          = args.batch_size,
-        lr                  = args.lr,
-        train_num_steps     = args.n_epochs,
-        gradient_accumulate_every = 2,
-        ema_decay           = args.ema_decay,
-        amp                 = False,
-        results_folder      = args.results_folder,
-        save_every          = args.save_every ,
-        sample_every        = args.sample_every,
-        save_best_and_latest_only = True,
-        wandb_run           = run,
-        vae                 = vae,
-        image_loss_weights  = image_loss_weights
-    )
-    return trainer
+      
+    if args.unet_type:
+        return Trainer_MultiTask(
+            diffusion,
+            train_dataloader,
+            test_dataloader,
+            accelerator,
+            use_t2w             = args.controlnet | args.use_T2W,
+            batch_size          = args.batch_size,
+            lr                  = args.lr,
+            train_num_steps     = args.n_epochs,
+            gradient_accumulate_every = 2,
+            ema_decay           = args.ema_decay,
+            amp                 = False,
+            results_folder      = args.results_folder,
+            save_every          = args.save_every ,
+            sample_every        = args.sample_every,
+            save_best_and_latest_only = True,
+            wandb_run           = run,
+            vae                 = vae,
+            image_loss_weights  = image_loss_weights
+        )
+    else: 
+        return Trainer(
+            diffusion,
+            train_dataloader,
+            test_dataloader,
+            accelerator,
+            use_t2w             = args.controlnet | args.use_T2W,
+            finetune_controlnet = args.controlnet,
+            batch_size          = args.batch_size,
+            lr                  = args.lr,
+            train_num_steps     = args.n_epochs,
+            gradient_accumulate_every = 2,
+            ema_decay           = args.ema_decay,
+            amp                 = False,
+            results_folder      = args.results_folder,
+            save_every          = args.save_every ,
+            sample_every        = args.sample_every,
+            save_best_and_latest_only = True,
+            wandb_run           = run,
+            vae                 = vae,
+            image_loss_weights  = image_loss_weights
+        )
 
  

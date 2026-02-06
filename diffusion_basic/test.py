@@ -10,7 +10,7 @@ from train_test_functions import (
 def main():
     device    = set_device()
     
-    model     = build_UNet(args, type='basic')
+    model     = build_UNet(args)
     diffusion = build_diffusion(args, model)
     load_model(args, model, diffusion, device)
     

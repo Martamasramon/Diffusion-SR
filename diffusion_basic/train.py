@@ -12,7 +12,7 @@ from train_test_functions import (
 def main():
     accelerator = Accelerator(split_batches=True, mixed_precision='no')
     
-    model     = build_UNet(args, type='basic')
+    model     = build_UNet(args)
     diffusion = build_diffusion(args, model)
     
     if args.checkpoint:

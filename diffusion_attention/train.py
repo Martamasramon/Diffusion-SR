@@ -13,7 +13,8 @@ def main():
     assert args.use_T2W 
     accelerator = Accelerator(split_batches=True, mixed_precision='no')
 
-    model     = build_UNet(args, type='attn')
+    args.unet_type = 'attn' 
+    model     = build_UNet(args)
     diffusion = build_diffusion(args, model)
     
     if args.checkpoint:

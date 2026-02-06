@@ -9,8 +9,9 @@ from train_test_functions import (
  
 def main():
     device    = set_device()
+    args.unet_type = 'attn' 
     
-    model     = build_UNet(args, type='attn')
+    model     = build_UNet(args)
     diffusion = build_diffusion(args, model)
     load_model(args, model, diffusion, device)
     
