@@ -20,12 +20,10 @@ def main():
     save_name = args.save_name if args.save_name is not None else os.path.basename(os.path.dirname(args.checkpoint))
     test_data = 'HistoMRI' if args.finetune else 'PICAI'
     
-    # visualize_variability_t2w(diffusion, dataloader, args.batch_size, device, controlnet=args.controlnet, output_name=f'{save_name}_{test_data}')
-    # visualize_variability(diffusion, dataloader, args.batch_size, device, controlnet=args.controlnet, output_name=f'{save_name}_{test_data}', use_T2W=args.use_T2W)
     visualize_batch(diffusion, dataloader, args.batch_size, device, controlnet=args.controlnet, output_name=f'{save_name}_{test_data}', use_T2W=args.use_T2W)
     
-    # print('Evaluating...')
-    evaluate_results(diffusion, dataloader, device, args.batch_size, use_T2W=args.use_T2W, controlnet=args.controlnet)
+    print('Evaluating...')
+    evaluate_results(args, diffusion, dataloader, device, args.batch_size, use_T2W=args.use_T2W, controlnet=args.controlnet)
     
 
 if __name__ == '__main__':

@@ -3,6 +3,9 @@ import torch
 import os
 import matplotlib.pyplot as plt
 import cv2 
+import csv
+from datetime import datetime
+
 from torchvision     import transforms as T
 from skimage.metrics import structural_similarity   as ssim_metric
 from skimage.metrics import peak_signal_noise_ratio as psnr_metric
@@ -134,7 +137,41 @@ def get_batch_images(dataloader, device, use_T2W, vae=None, batch=None):
     
     return highres, lowres, t2w_input, batch   
 
-def evaluate_results(diffusion, dataloader, device, batch_size, use_T2W=False, controlnet=False, vae=None):
+def log_metrics_to_csv(args, mse, psnr,ssim,csv_path='/cluster/project7/ProsRegNet_CellCount/CriDiff/results.csv'):
+    """
+    Append evaluation metrics + selected args to a CSV file.
+    """
+    row = { "timestamp": datetime.now().isoformat() }
+
+    ARG_KEYS = [
+        "checkpoint",
+        "img_size",
+        "down",
+        "unet_type",
+        "use_T2W",
+        "use_HBV",
+        "controlnet",
+        "finetune"
+    ]
+    
+    for k in ARG_KEYS:
+        if hasattr(args, k):
+            row[k] = getattr(args, k)
+            
+    row ["mse"]  = mse
+    row ["psnr"] = psnr
+    row ["ssim"] = ssim
+
+    file_exists = os.path.exists(csv_path)
+
+    with open(csv_path, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=row.keys())
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(row)
+
+
+def evaluate_results(args, diffusion, dataloader, device, batch_size, use_T2W=False, controlnet=False, vae=None):
     """
     Iterate over dataloader and compute average MSE/PSNR/SSIM over all samples.
     """
@@ -156,9 +193,15 @@ def evaluate_results(diffusion, dataloader, device, batch_size, use_T2W=False, c
             prediction, target, mse_list, psnr_list, ssim_list
         )
         
-    print(f'Average MSE:  {np.mean(mse_list):.6f}')
-    print(f'Average PSNR: {np.mean(psnr_list):.2f}')
-    print(f'Average SSIM: {np.mean(ssim_list):.4f}')
+    mse  = np.mean(mse_list)
+    psnr = np.mean(psnr_list)
+    ssim = np.mean(ssim_list)  
+    
+    print(f'Average MSE:  {mse:.6f}')
+    print(f'Average PSNR: {psnr:.2f}')
+    print(f'Average SSIM: {ssim:.4f}')
+    
+    log_metrics_to_csv(args, mse, psnr, ssim)
 
 def uq_calibration(x0_samples, highres):
     '''
@@ -408,7 +451,8 @@ def visualize_batch(
     #         lowres[i] = cv2.resize(lowres[i], (full_size,full_size), interpolation=cv2.INTER_LINEAR)
     #     lowres    = lowres.to(device)
     
-    t2w_input = get_t2w_input(batch, device)
+    if use_T2W:
+        t2w_input = get_t2w_input(batch, device)
     
     for i in range(batch_size):
         count = 0
