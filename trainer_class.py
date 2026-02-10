@@ -46,6 +46,7 @@ class Trainer(object):
         adam_betas                  = (0.9, 0.99),
         save_every                  = 5000,
         sample_every                = 2000,
+        val_every                   = 100,
         num_samples                 = 25,
         results_folder              = './results',
         amp                         = False,
@@ -88,6 +89,7 @@ class Trainer(object):
         self.num_samples    = num_samples
         self.save_every     = save_every
         self.sample_every   = sample_every
+        self.val_every      = val_every
 
         self.batch_size                = batch_size
         self.gradient_accumulate_every = gradient_accumulate_every
@@ -292,6 +294,30 @@ class Trainer(object):
         
         utils.save_image(all_images, str(self.results_folder / f'sample-{milestone}.png'), nrow = int(math.sqrt(self.num_samples)))
 
+    
+    def _fmt_losses_for_pbar(self, losses: dict) -> str:
+        if not losses:
+            return ""
+
+        # single-task
+        if all(k in losses for k in ("mse", "perct", "ssim")):
+            return f"(MSE {losses['mse']:.4f}, perct {losses['perct']:.4f}, SSIM {losses['ssim']:.4f})"
+
+        # multitask (ADC / T2W)
+        parts = []
+        for p in ("adc", "t2w"):
+            keys = [f"{p}_mse", f"{p}_perct", f"{p}_ssim"]
+            if any(k in losses for k in keys):
+                vals = [f"{k.split('_')[1]} {losses[k]:.4f}" for k in keys if k in losses]
+                parts.append(f"{p.upper()}: " + ", ".join(vals))
+        if parts:
+            return "(" + " | ".join(parts) + ")"
+
+        # fallback: show first few numeric entries
+        return "(" + ", ".join(
+            f"{k} {v:.4f}" for k, v in list(losses.items())[:4] if isinstance(v, (int, float))
+        ) + ")"
+
                 
     def train(self):
         accelerator = self.accelerator
@@ -300,8 +326,15 @@ class Trainer(object):
 
             while self.step < self.train_num_steps:
                 # Calculate loss
-                _,    total_loss_train, total_losses_train = self.calc_loss(train=True)
-                data, total_loss_val , total_losses_val    = self.calc_loss(train=False)
+                _, total_loss_train, total_losses_train = self.calc_loss(train=True)
+                
+                # Validate every few steps to reduce overhead 
+                do_val = (self.step % self.val_every == 0)
+                if do_val:
+                    with torch.no_grad():
+                        data, total_loss_val, total_losses_val = self.calc_loss(train=False)
+                else:
+                    total_loss_val, total_losses_val = None, None
                 
                 accelerator.wait_for_everyone()
                 accelerator.clip_grad_norm_(self.trainable_params, self.max_grad_norm)
@@ -323,8 +356,11 @@ class Trainer(object):
                     # Save model 
                     if self.step != 0 and divisible_by(self.step, self.save_every):
                         milestone = self.step // self.save_every
-                        if self.save_best_and_latest_only:
-                            val_mse = total_losses_val.get('mse', total_loss_val)
+                        if self.save_best_and_latest_only and do_val:
+                            if 'mse' in total_losses_val:
+                                val_mse = total_losses_val['mse']
+                            else:
+                                val_mse = total_losses_val.get('adc_mse', total_loss_val)
                             if self.best_mse > val_mse:
                                 self.best_mse = val_mse
                                 self.save("best")
@@ -332,31 +368,180 @@ class Trainer(object):
                         else:
                             self.save(milestone)
                 
+                # Log losses to wandb
                 if self.run is not None:
-                    log_losses = {
-                        'Train - total': total_loss_train,
-                        'Val - total':   total_loss_val,
-                    }
-                    for key in total_losses_train:
-                        log_losses['Train - '+key] = total_losses_train[key]
-                        log_losses['Val - '+key]   = total_losses_val[key]
+                    log_losses = {'Train - total': total_loss_train}
+                    for k, v in total_losses_train.items():
+                        log_losses['Train - ' + k] = v
+                        
+                    if do_val:
+                        log_losses['Val - total'] = total_loss_val
+                        for k, v in total_losses_val.items():
+                            log_losses['Val - ' + k] = v
+
                     self.run.log(log_losses)
                     
                 # Update pbar
                 if self.step % 100 == 0:
-                    pbar.set_description(f"Train loss: {total_loss_train:.4f} (MSE: {total_losses_train['mse']:.4f},  perct: {total_losses_train['perct']:.4f}, SSIM: {total_losses_train['ssim']:.4f},)\n"+
-                                         f"Test loss:  {total_loss_val:.4f} (MSE: {total_losses_val['mse']:.4f},  perct: {total_losses_val['perct']:.4f}, SSIM: {total_losses_val['ssim']:.4f},)")
+                    desc = f"Train loss: {total_loss_train:.4f} {self._fmt_losses_for_pbar(total_losses_train)}"
+                    if do_val:
+                        desc += f"\nValidation loss: {total_loss_val:.4f} {self._fmt_losses_for_pbar(total_losses_val)}"
+
+                    pbar.set_description(desc)
                     pbar.update(100)
 
         accelerator.print('training complete')
 
 
 
-class Trainer_mod(Trainer):
-    def __init__(self, *args, **kwargs):
-        # IMPORTANT: forward args to base Trainer
+class Trainer_MultiTask(Trainer):
+    """
+    Multi-task trainer for a Diffusion_MultiTask model that outputs ADC SR + T2W denoising jointly.
+
+    Expected model.forward(...) output (recommended):
+        pred_adc, pred_t2w, total_loss, logs_dict, t
+
+    If your Diffusion_MultiTask currently returns:
+        pred_adc, pred_t2w, total_loss, (mse_adc, perct_adc, ssim_adc), (mse_t2w, perct_t2w, ssim_t2w), t
+    that's also supported (logs_dict will be constructed).
+
+    Batch keys (defaults):
+        ADC_input, ADC_condition, (optional ADC_target)
+        T2W_condition (used as clean T2W image), (optional T2W_target)
+    """
+
+    def __init__(
+        self,
+        *args,
+        save_t2w_samples: bool = True,
+        **kwargs
+    ):
         super().__init__(*args, **kwargs)
 
+        self.save_t2w_samples = save_t2w_samples
+
+        if self.vae is not None:
+            self.image_loss = Losses()
+            self.image_loss = self.accelerator.prepare(self.image_loss)
+
+    # -------------------------
+    # Helpers
+    # -------------------------
+    def _move_batch_to_device(self, data: dict):
+        for key, value in data.items():
+            try:
+                data[key] = value.to(self.accelerator.device)
+            except:
+                data[key] = [i.to(self.accelerator.device) for i in value]
+        return data
+
+    def _maybe_encode_latents(self, data: dict):
+        if self.vae is None:
+            return data
+
+        keys_to_encode = ["ADC_input", "ADC_condition", "ADC_target", "T2W_condition", "T2W_input", "T2W_target"]
+        for k in keys_to_encode:
+            if k in data and isinstance(data[k], torch.Tensor):
+                data[k], _ = encode_latent(data[k], self.vae)
+        return data
+    
+    def _parse_multitask_forward_output(self, out):
+        """
+        Accepts either:
+          (pred_adc, pred_t2w, total, logs_dict, t)
+        or
+          (pred_adc, pred_t2w, total, (mse_adc, perct_adc, ssim_adc), (mse_t2w, perct_t2w, ssim_t2w), t)
+
+        Returns:
+          pred_adc, pred_t2w, total_loss, logs_dict, t
+        """
+        if not isinstance(out, (tuple, list)):
+            raise TypeError(f"Model output must be tuple/list, got {type(out)}")
+
+        if len(out) == 5 and isinstance(out[3], dict):
+            pred_adc, pred_t2w, total_loss, logs, t = out
+            return pred_adc, pred_t2w, total_loss, logs, t
+
+        if len(out) == 6:
+            pred_adc, pred_t2w, total_loss, adc_losses, t2w_losses, t = out
+            mse_adc, perct_adc, ssim_adc = adc_losses
+            mse_t2w, perct_t2w, ssim_t2w = t2w_losses
+            logs = {
+                "adc_mse":   mse_adc.mean()   if isinstance(mse_adc,   torch.Tensor) else mse_adc,
+                "adc_perct": perct_adc.mean() if isinstance(perct_adc, torch.Tensor) else perct_adc,
+                "adc_ssim":  ssim_adc.mean()  if isinstance(ssim_adc,  torch.Tensor) else ssim_adc,
+                "t2w_mse":   mse_t2w.mean()   if isinstance(mse_t2w,   torch.Tensor) else mse_t2w,
+                "t2w_perct": perct_t2w.mean() if isinstance(perct_t2w, torch.Tensor) else perct_t2w,
+                "t2w_ssim":  ssim_t2w.mean()  if isinstance(ssim_t2w,  torch.Tensor) else ssim_t2w,
+            }
+            return pred_adc, pred_t2w, total_loss, logs, t
+
+        raise ValueError(f"Unrecognized multitask model output signature with len={len(out)}")
+
+    def _add_recon_image_loss(
+        self,
+        *,
+        pred_latent: torch.Tensor,
+        target_img: torch.Tensor,
+        t: torch.Tensor,
+        loss: torch.Tensor,
+        logs: dict,
+        prefix: str,
+    ):
+        """
+        Adds decoded-image reconstruction loss to `loss` and fills `logs` with:
+        {prefix}_recon_mse, {prefix}_recon_perct, {prefix}_recon_ssim, {prefix}_recon_total
+
+        Assumes:
+        - pred_latent is what your diffusion predicts (latent if VAE exists, else image)
+        - target_img is the image-space target (already on device, matching expected range)
+        - self.image_loss is Losses() with calc_mse/calc_percept/calc_ssim
+        - self.image_loss_weights is dict with mse/perct/ssim
+        - uses diffusion SNR weighting via extract(self.model.loss_weight, t, per_sample_loss.shape)
+        """
+        if self.image_loss_weights is None or self.vae is None:
+            return loss, logs
+
+        pred_img = decode_latent(pred_latent, self.vae)
+        # your decode returns [B, C, H, W]; keep first channel if needed
+        if pred_img.ndim == 4 and pred_img.shape[1] != 1:
+            pred_img = pred_img[:, 0:1]
+        if target_img.ndim == 4 and target_img.shape[1] != 1:
+            target_img = target_img[:, 0:1]
+
+        # Compute per-sample components
+        recon_mse   = self.image_loss.calc_mse(pred_img, target_img)          # [B]
+        recon_perct = self.image_loss.calc_percept(pred_img, target_img)      # usually scalar or [B]
+        recon_ssim  = self.image_loss.calc_ssim(pred_img, target_img)         # [B] if implemented like yours
+
+        # Make sure perct is per-sample for weighting; if it's scalar, expand
+        if isinstance(recon_perct, torch.Tensor) and recon_perct.ndim == 0:
+            recon_perct = recon_perct.expand_as(recon_mse)
+
+        # Weighted per-sample total
+        recon_total = (
+            self.image_loss_weights.get("mse", 0.0)   * recon_mse +
+            self.image_loss_weights.get("perct", 0.0) * recon_perct +
+            self.image_loss_weights.get("ssim", 0.0)  * recon_ssim
+        )
+
+        # SNR-based weighting (same as your diffusion loss)
+        recon_total = recon_total * extract(self.model.loss_weight, t, recon_total.shape)
+
+        # Add to main loss
+        loss = loss + recon_total.mean()
+
+        # Logging (means)
+        logs[f"{prefix}_recon_mse"]   = recon_mse.mean()
+        logs[f"{prefix}_recon_perct"] = recon_perct.mean() if isinstance(recon_perct, torch.Tensor) else float(recon_perct)
+        logs[f"{prefix}_recon_ssim"]  = recon_ssim.mean()
+        logs[f"{prefix}_recon_total"] = recon_total.mean()
+
+        return loss, logs
+
+    # -------------------------
+    # Core train/val loss
+    # -------------------------
     def calc_loss(self, train=True):
         if train:
             if self.finetune_controlnet:
@@ -368,10 +553,9 @@ class Trainer_mod(Trainer):
             self.model.eval()
 
         total_loss = 0.0
-        total_losses = {}  # dynamic keys (mse/perct/ssim/loss_t2w/...)
+        total_losses = {}  # dynamic log keys
 
         if self.vae is not None:
-            # keep your latent recon logging if you still want it
             total_losses["recon_mse"] = 0.0
             total_losses["recon_perct"] = 0.0
             total_losses["recon_ssim"] = 0.0
@@ -381,84 +565,104 @@ class Trainer_mod(Trainer):
         for _ in range(self.gradient_accumulate_every):
             data = next(dataloader)
 
-            # move to device
-            if self.vae is not None:
-                data["Image_target"] = data["ADC_condition"]
-
-            for key, value in data.items():
-                try:
-                    data[key] = value.to(self.accelerator.device)
-                except:
-                    data[key] = [i.to(self.accelerator.device) for i in value]
-
-                # latent encode if needed
-                if self.vae is not None and key in ["ADC_input", "ADC_condition", "ADC_target", "T2W_condition", "T2W_target"]:
-                    data[key], _ = encode_latent(data[key], self.vae)
+            # Move to device & encode latents if needed
+            data = self._move_batch_to_device(data)
+            data = self._maybe_encode_latents(data)
 
             with self.accelerator.autocast():
-                control = data["T2W_condition"] if getattr(self.model, "controlnet", None) else None
-
-                # ADC eval target
-                if "ADC_target" in data:
-                    defined_target = data["ADC_target"]
-                    eval_transform = downsample_transform(self.img_size)
-                else:
-                    defined_target, eval_transform = None, None
-
-                # NEW: T2W condition + optional clean target
-                t2w_def = data["T2W_condition"] if self.use_t2w else None
-                t2w_tgt = data.get("T2W_target", None)  # requires dataset to provide it for supervised T2W branch
-
-                # IMPORTANT: Diffusion_mod returns (prediction, loss, logs, t)
-                prediction, loss, logs, t = self.model(
+                out = self.model(
                     data["ADC_input"],
                     data["ADC_condition"],
-                    t2w_def,
-                    control,
-                    t2w_target=t2w_tgt,
-                    defined_target=defined_target,
-                    eval_transform=eval_transform,
+                    data["T2W_input"],
+                    data["T2W_condition"],
                 )
+                
+                pred_adc, pred_t2w, loss, logs, t = self._parse_multitask_forward_output(out)
 
-                # optional latent recon loss (same as your original logic)
+                # Optional: latent recon loss for ADC prediction (same as your original logic)
                 if self.vae is not None and self.image_loss_weights is not None:
-                    reconstruction = decode_latent(prediction, self.vae)[:, 0, :, :].unsqueeze(1)
-                    img_target = data["Image_target"]
-
-                    recon_mse = self.image_loss.calc_mse(reconstruction, img_target)
-                    recon_perct = self.image_loss.calc_percept(reconstruction, img_target)
-                    recon_ssim = self.image_loss.calc_ssim(reconstruction, img_target)
-
-                    # per-sample recon loss for SNR weighting
-                    recon_loss = (
-                        self.image_loss_weights["mse"] * recon_mse
-                        + self.image_loss_weights["perct"] * recon_perct
-                        + self.image_loss_weights["ssim"] * recon_ssim
+                    loss, logs = self._add_recon_image_loss(
+                        pred_latent = pred_adc,
+                        target_img  = data["ADC_input"],   
+                        t           = t,
+                        loss        = loss,
+                        logs        = logs,
+                        prefix      = "adc",
                     )
-                    recon_loss *= extract(self.model.loss_weight, t, recon_loss.shape)
-                    loss = loss + recon_loss.mean()
+                    loss, logs = self._add_recon_image_loss(
+                        pred_latent = pred_t2w,
+                        target_img  = data["T2W_input"],  
+                        t           = t,
+                        loss        = loss,
+                        logs        = logs,
+                        prefix      = "t2w",
+                    )
 
-                    # log recon components
-                    logs["recon_mse"] = recon_mse.mean()
-                    logs["recon_perct"] = recon_perct.mean() if isinstance(recon_perct, torch.Tensor) else torch.tensor(0.0, device=self.device)
-                    logs["recon_ssim"] = recon_ssim.mean()
-
-                # accumulate totals
+                # accumulate
                 total_loss += loss.detach().item() / self.gradient_accumulate_every
-
-                for name, val in logs.items():
-                    if isinstance(val, torch.Tensor):
-                        val = val.mean()
-                        val_item = val.detach().item()
+                for k, v in logs.items():
+                    if isinstance(v, torch.Tensor):
+                        v = v.mean().detach().item()
                     else:
-                        val_item = float(val)
-
-                    total_losses[name] = total_losses.get(name, 0.0) + val_item / self.gradient_accumulate_every
+                        v = float(v)
+                    total_losses[k] = total_losses.get(k, 0.0) + v / self.gradient_accumulate_every
 
             if train:
                 self.accelerator.backward(loss)
 
         return data, total_loss, total_losses
 
-    # You can keep sample_images identical for now (it will still sample ADC via diffusion.sample()).
-    # If later you extend sampling to output T2W too, we can adjust here.
+    # -------------------------
+    # Sampling
+    # -------------------------
+    def sample_images(self, data):
+        """
+        Save grids of ADC and (optionally) T2W samples from EMA model.
+        """
+        with torch.no_grad():
+            milestone = self.step // self.sample_every
+            batches = num_to_groups(self.num_samples, self.batch_size)
+
+            cond_adc_full = data["ADC_condition"][:self.num_samples].to(self.accelerator.device)
+            cond_t2w_full = data["T2W_condition"][:self.num_samples].to(self.accelerator.device)
+
+            all_adc = []
+            all_t2w = []
+
+            start = 0
+            total = cond_adc_full.shape[0]
+
+            for n in batches:
+                end = min(start + n, total)
+                cond_adc = cond_adc_full[start:end]
+                cond_t2w = cond_t2w_full[start:end]
+
+                if cond_adc.shape[0] == 0:
+                    break
+
+                # EMA model returns (adc, t2w) for multitask sample()
+                adc_s, t2w_s = self.ema.ema_model.sample(
+                    cond_adc=cond_adc,
+                    cond_t2w=cond_t2w,
+                    batch_size=cond_adc.shape[0],
+                    return_all_timesteps=False
+                )
+
+                all_adc.append(adc_s)
+                all_t2w.append(t2w_s)
+
+                start = end
+
+            all_adc = torch.cat(all_adc, dim=0)
+            all_t2w = torch.cat(all_t2w, dim=0)
+
+            # decode latents if needed
+            if self.vae is not None:
+                all_adc = decode_latent(all_adc, self.vae)[:, 0, :, :].unsqueeze(1)
+                all_t2w = decode_latent(all_t2w, self.vae)[:, 0, :, :].unsqueeze(1)
+
+            nrow = int(math.sqrt(self.num_samples))
+            utils.save_image(all_adc, str(self.results_folder / f"sample-adc-{milestone}.png"), nrow=nrow)
+
+            if self.save_t2w_samples:
+                utils.save_image(all_t2w, str(self.results_folder / f"sample-t2w-{milestone}.png"), nrow=nrow)
