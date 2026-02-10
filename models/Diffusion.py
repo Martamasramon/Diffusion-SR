@@ -137,9 +137,7 @@ class Diffusion(nn.Module):
         self.loss           = Losses()
         self.loss_weights   = loss_weights
         
-        print('Training loss weights:')
-        for loss in loss_weights.keys():
-            print(loss, loss_weights[loss])
+        print("Loss weights:", self.loss_weights)
 
     @property
     def device(self):
