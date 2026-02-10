@@ -119,7 +119,7 @@ class UNet_MultiTask(nn.Module):
         self.mask_channels      = 1
         self.self_condition     = getattr(unet_adc, "self_condition", False) or getattr(unet_t2w, "self_condition", False)
         self.controlnet         = None
-        self.concat_t2w         = False
+        self.use_T2W         = False
 
         # Cross-attn modules: one per block index (encoder + decoder), plus optional middle.
         self.cross_encoder = cross_encoder

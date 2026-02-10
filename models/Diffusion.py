@@ -67,7 +67,7 @@ class Diffusion(nn.Module):
         self.objective              = objective
         
         self.controlnet = self.model.controlnet 
-        self.concat_t2w = self.model.concat_t2w
+        self.use_T2W    = self.model.use_T2W
                 
         self.channels = self.model.input_img_channels
 

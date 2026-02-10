@@ -33,8 +33,8 @@ class Trainer(object):
         test_dataloader,
         accelerator,
         *,
-        use_t2w                     = False,
-        use_t2w_embed               = False,
+        use_T2W                     = False,
+        use_T2W_embed               = False,
         finetune_controlnet         = False,
         batch_size                  = 16,
         img_size                    = 64,
@@ -67,8 +67,8 @@ class Trainer(object):
         is_ddim_sampling    = diffusion_model.is_ddim_sampling
 
         self.img_size       = img_size        
-        self.use_t2w        = use_t2w
-        self.use_t2w_embed  = use_t2w_embed
+        self.use_T2W        = use_T2W
+        self.use_T2W_embed  = use_T2W_embed
         self.finetune_controlnet = finetune_controlnet
         
         if self.finetune_controlnet:
@@ -207,7 +207,7 @@ class Trainer(object):
                      
             with self.accelerator.autocast():
                 control = data['T2W_condition'] if self.model.controlnet else None
-                t2w_in  = data['T2W_condition'] if (self.use_t2w and self.model.controlnet is None) else None
+                t2w_in  = data['T2W_condition'] if (self.use_T2W and self.model.controlnet is None) else None
                 if 'ADC_target' in data.keys():
                     defined_target = data['ADC_target'] 
                     eval_transform = downsample_transform(self.img_size) 
@@ -215,7 +215,7 @@ class Trainer(object):
                     defined_target, eval_transform = None, None
                 
                 losses = {}
-                if self.use_t2w_embed:
+                if self.use_T2W_embed:
                     data['T2W_embed'] = [t.squeeze(1) for t in data['T2W_embed']]
                     prediction, loss, losses['mse'], losses['perct'], losses['ssim'], t = self.model(data['ADC_input'], data['ADC_condition'], data['T2W_embed'], control, defined_target, eval_transform)
                 else:
@@ -256,7 +256,7 @@ class Trainer(object):
             milestone       = self.step // self.sample_every
             batches         = num_to_groups(self.num_samples, self.batch_size)
             sample_lowres   = data['ADC_condition'][:self.num_samples].to(self.accelerator.device)
-            sample_t2w      = data['T2W_condition'][:self.num_samples].to(self.accelerator.device) if (self.model.controlnet is not None) or self.model.concat_t2w else None
+            sample_t2w      = data['T2W_condition'][:self.num_samples].to(self.accelerator.device) if (self.model.controlnet is not None) or self.model.use_T2W else None
             
             if 'T2W_embed' in data:
                 sample_t2w_embed = []
@@ -281,7 +281,7 @@ class Trainer(object):
                     images    = self.ema.ema_model.sample(batch_size=low_res.shape[0], low_res=low_res, t2w=t2w_embed)
                 else:
                     control = t2w if self.model.controlnet else None
-                    t2w_in  = t2w if (self.model.concat_t2w and self.model.controlnet is None) else None
+                    t2w_in  = t2w if (self.model.use_T2W and self.model.controlnet is None) else None
                     images  = self.ema.ema_model.sample(batch_size=low_res.shape[0], low_res=low_res, control=control, t2w=t2w_in)
                     
                 all_images_list.append(images)

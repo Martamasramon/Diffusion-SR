@@ -54,7 +54,7 @@ def build_UNet(args, img_channels=1):
             dim_mults       = tuple(args.dim_mults),
             self_condition  = args.self_condition,
             controlnet      = args.controlnet,
-            concat_t2w      = args.use_T2W,
+            use_T2W         = args.use_T2W,
             img_channels    = img_channels
         )
     elif args.unet_type == 'attn':
@@ -194,7 +194,7 @@ def build_trainer(args,diffusion,train_dataloader,test_dataloader,accelerator,ru
             train_dataloader,
             test_dataloader,
             accelerator,
-            use_t2w             = (args.controlnet or args.use_T2W),
+            use_T2W             = (args.controlnet or args.use_T2W),
             batch_size          = args.batch_size ,
             lr                  = args.lr,
             train_num_steps     = args.n_epochs,
@@ -215,7 +215,7 @@ def build_trainer(args,diffusion,train_dataloader,test_dataloader,accelerator,ru
             train_dataloader,
             test_dataloader,
             accelerator,
-            use_t2w             = (args.controlnet or args.use_T2W),
+            use_T2W             = (args.controlnet or args.use_T2W),
             finetune_controlnet = args.controlnet,
             batch_size          = args.batch_size,
             lr                  = args.lr,

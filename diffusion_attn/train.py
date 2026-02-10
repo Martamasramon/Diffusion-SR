@@ -74,7 +74,7 @@ def main():
         train_dataloader,
         test_dataloader,
         accelerator,
-        use_t2w_embed       = True,
+        use_T2W_embed       = True,
         batch_size          = args.batch_size,
         lr                  = args.lr,
         train_num_steps     = args.n_epochs,

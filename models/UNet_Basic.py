@@ -18,7 +18,7 @@ class UNet_Basic(nn.Module):
         self_condition: bool  = True,
         with_time_emb:  bool  = True,
         controlnet:     bool  = False,
-        concat_t2w:     bool  = False,
+        use_T2W:        bool  = False,
         img_channels:   int   = 1,
     ):
         super().__init__()
@@ -28,7 +28,7 @@ class UNet_Basic(nn.Module):
         self.dim_mults      = tuple(dim_mults)
         self.self_condition = bool(self_condition)
         self.with_time_emb  = bool(with_time_emb)
-        self.concat_t2w     = bool(concat_t2w)
+        self.use_T2W        = bool(use_T2W)
 
         # Ensure modules can access channels
         self.input_img_channels = img_channels
@@ -37,7 +37,7 @@ class UNet_Basic(nn.Module):
         # Channel composition: input image + condition + optional self-cond + optional t2w
         cond_channels           = img_channels
         self_cond_channels      = img_channels if self.self_condition else 0
-        t2w_channels            = img_channels if self.concat_t2w else 0
+        t2w_channels            = img_channels if self.use_T2W else 0
         self.input_channels     = img_channels + cond_channels + self_cond_channels + t2w_channels  # channels fed into initial conv
         
         # Optional ControlNet 
@@ -118,8 +118,8 @@ class UNet_Basic(nn.Module):
             
         # Concatenate inputs: [x_img, low_res, (t2w), (self_condition)]
         parts = [x_img, low_res]
-        if self.concat_t2w:
-            assert t2w is not None, "concat_t2w=True but t2w is None"
+        if self.use_T2W:
+            assert t2w is not None, "use_T2W=True but t2w is None"
             parts.append(t2w)
         if self.self_condition:
             x_self_cond = default(x_self_cond, lambda: torch.zeros_like(x_img))
