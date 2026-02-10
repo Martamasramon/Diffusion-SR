@@ -41,6 +41,7 @@ class UNet_Basic(nn.Module):
             self,
             image_size              = 64,
             use_T2W                 = False,
+            use_HBV                 = False,
             attention_resolutions   = (2, 4, 8),     # (4, 8, 16) if 128
             channel_mult            = (1, 2, 4, 8), # (1, 2, 4, 8, 8) if 128
             model_channels          = 96,
@@ -60,8 +61,12 @@ class UNet_Basic(nn.Module):
         super().__init__()
 
         self.image_size         = image_size
-        self.in_channels        = (3 if use_T2W else 2) if in_channels is None else in_channels
-        self.in_channels        = self.in_channels + 1 if self_condition else self.in_channels
+        base_channels = 2       # x + low_res
+        if use_T2W:
+            base_channels += 1
+        if use_HBV:
+            base_channels += 1  
+        self.in_channels        = base_channels + (1 if self_condition else 0)
         self.model_channels     = model_channels
         self.out_channels       = 1 
         self.num_res_blocks     = num_res_blocks
@@ -76,12 +81,13 @@ class UNet_Basic(nn.Module):
         self.num_heads_upsample = num_heads
         self.dims               = dims
         self.self_condition     = self_condition
+        self.use_T2W            = use_T2W
+        self.use_HBV            = use_HBV
         
         # Make compatible with diffusion script
         self.input_img_channels = 1
         self.mask_channels      = 1
         self.controlnet         = None
-        self.concat_t2w         = use_T2W
 
         # Time embedding
         time_embed_dim = model_channels * 4
@@ -247,7 +253,7 @@ class UNet_Basic(nn.Module):
         self.middle_block.apply(convert_module_to_f32)
         self.output_blocks.apply(convert_module_to_f32)
 
-    def forward(self, x, low_res, timesteps, x_self_cond=None, t2w=None, control=None):
+    def forward(self, x, low_res, timesteps, x_self_cond=None, t2w=None, hbv=None, control=None):
         hs = []
 
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
@@ -256,11 +262,17 @@ class UNet_Basic(nn.Module):
             x_self_cond = default(x_self_cond, lambda: torch.zeros_like(x))
             x = torch.cat([x, x_self_cond], dim=1)
         
-        # concatenate inputs 
-        if t2w is not None:
-            h = torch.cat([x, low_res, t2w], dim=1).type(self.dtype)
-        else:
-            h = torch.cat([x, low_res], dim=1).type(self.dtype)
+        concat_parts = [x, low_res]
+        
+        if self.use_T2W:
+            assert t2w is not None, "use_T2W=True but no T2W provided"
+            concat_parts.append(t2w)
+        
+        if self.use_HBV:  
+            assert hbv is not None, "use_HBV=True but no HBV provided"
+            concat_parts.append(hbv)
+        
+        h = torch.cat(concat_parts, dim=1).type(self.dtype)
 
         # encoder + skips
         for idx in range(len(self.input_blocks)):
@@ -305,10 +317,12 @@ class UNet_DisC_Diff(UNet_Basic):
     def __init__(self, *args, in_channels=1, **kwargs):
         super().__init__(*args, in_channels=in_channels, **kwargs)    
         
-        conv_ch = self.image_size # 288
-
         self.input_blocks_lr  = nn.ModuleList([copy.deepcopy(module) for module in self.input_blocks])
-        self.input_blocks_t2w = nn.ModuleList([copy.deepcopy(module) for module in self.input_blocks])
+        
+        if self.use_T2W:
+            self.input_blocks_t2w = nn.ModuleList([copy.deepcopy(module) for module in self.input_blocks])
+        if self.use_HBV: 
+            self.input_blocks_hbv = nn.ModuleList([copy.deepcopy(module) for module in self.input_blocks])
 
         enc_ch = int(self.model_channels * self.channel_mult[-1])
 
@@ -332,7 +346,7 @@ class UNet_DisC_Diff(UNet_Basic):
             nn.SiLU()
         )
 
-    def forward(self, x, low_res, timesteps,  x_self_cond=None, t2w=None, control=None):
+    def forward(self, x, low_res, timesteps,  x_self_cond=None, t2w=None, hbv=None, control=None):
         """
         Apply the model to an input batch.
         :param x: an [N x C x ...] Tensor of inputs.
@@ -345,29 +359,44 @@ class UNet_DisC_Diff(UNet_Basic):
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
         h1 = x.type(self.dtype)
         h2 = low_res.type(self.dtype)
-        h3 = t2w.type(self.dtype)
-
+        h3 = t2w.type(self.dtype) if (t2w is not None and self.use_T2W) else None
+        h4 = hbv.type(self.dtype) if (hbv is not None and self.use_HBV) else None
+            
         for idx in range(len(self.input_blocks)):
             h1 = self.input_blocks[idx](h1, emb)
             h2 = self.input_blocks_lr[idx](h2, emb)
-            h3 = self.input_blocks_t2w[idx](h3, emb)
-            hs.append((1 / 3) * h1 + (1 / 3) * h2 + (1 / 3) * h3)
+            
+            if h3 is not None:
+                h3 = self.input_blocks_t2w[idx](h3, emb)
+            
+            if h4 is not None:
+                h4 = self.input_blocks_hbv[idx](h4, emb)
+             
+            feats = [h1, h2]
+            if h3 is not None:
+                feats.append(h3)
+            if h4 is not None:
+                feats.append(h4)
 
-        com_h1 = self.conv_common(h1)
-        com_h2 = self.conv_common(h2)
+            hs.append(sum(feats) / len(feats))   
 
-        dist_h1 = self.conv_distinct(h1)
-        dist_h2 = self.conv_distinct(h2)
+        # Common branches
+        com_hs = [self.conv_common(h1), self.conv_common(h2)]
+        if h3 is not None:
+            com_hs.append(self.conv_common(h3))
+        if h4 is not None:
+            com_hs.append(self.conv_common(h4))
+        com_h = self.SE_Attention_com(sum(com_hs) / len(com_hs))
+        
+        # Distinct branches
+        dist_hs = [self.SE_Attention_dist_1(self.conv_distinct(h1)), 
+                     self.SE_Attention_dist_2(self.conv_distinct(h2))]
+        if h3 is not None:
+            dist_hs.append(self.SE_Attention_dist_3(self.conv_distinct(h3)))
+        if h4 is not None:
+            dist_hs.append(self.SE_Attention_dist_4(self.conv_distinct(h4)))
 
-        dist_h1 = self.SE_Attention_dist_1(dist_h1)
-        dist_h2 = self.SE_Attention_dist_2(dist_h2)
-
-
-        com_h3 = self.conv_common(h3)
-        dist_h3 = self.conv_distinct(h3)
-        com_h = self.SE_Attention_com((1 / 3) * com_h1 + (1 / 3) * com_h2 + (1 / 3) * com_h3)
-        dist_h3 = self.SE_Attention_dist_3(dist_h3)
-        h = torch.cat([com_h, dist_h1, dist_h2, dist_h3], dim=1)
+        h = torch.cat([com_h] + dist_hs, dim=1)
         h = self.dim_reduction_non_zeros(h)
 
         h = self.middle_block(h, emb)
