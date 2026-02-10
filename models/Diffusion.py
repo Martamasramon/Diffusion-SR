@@ -1,18 +1,20 @@
-import lpips
 import torch
 import torch.nn.functional as F
 from torch          import nn
 from torch.amp      import autocast
-from einops         import rearrange, reduce
-from tqdm.auto      import tqdm
+from einops         import reduce
 from random         import random
 from functools      import partial
 from collections    import namedtuple
 from piq            import ssim
 from loss           import VGGPerceptualLoss
 
-from network_utils   import *
-from network_modules import *
+from network_utils   import (
+    default,
+    linear_beta_schedule, cosine_beta_schedule, sigmoid_beta_schedule,
+    normalize_to_neg_one_to_one, unnormalize_to_zero_to_one, identity,
+    extract
+    )
 
 ModelPrediction =  namedtuple('ModelPrediction', ['pred_noise', 'x_start'])
 

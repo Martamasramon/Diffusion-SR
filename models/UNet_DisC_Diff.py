@@ -1,25 +1,20 @@
-import numpy as np
 import torch 
 import torch.nn as nn
-import torch.nn.functional as F
 import copy
 
 from network_utils   import default
 from network_modules_DisC_Diff import (
-    checkpoint,
     conv_nd,
     linear,
     zero_module,
     normalization,
     timestep_embedding,
-    AttentionPool2d,
     TimestepEmbedSequential,
     SE_Attention,
     Upsample,
     Downsample,
     ResBlock,
     AttentionBlock,
-    QKVAttention,
     convert_module_to_f16, 
     convert_module_to_f32
 )

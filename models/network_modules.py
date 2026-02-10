@@ -5,10 +5,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn, einsum
 import math
-import numpy as np
-from functools     import partial
-from network_utils import *
-from einops        import rearrange,repeat
+from network_utils import default, exists, divisible_by
+from einops        import rearrange
 
 
 class EMA():

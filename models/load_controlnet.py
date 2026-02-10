@@ -1,4 +1,3 @@
-import torch
 import re
 
 def load_pretrained_with_controlnet(diffusion, ckpt, verbose=True):
