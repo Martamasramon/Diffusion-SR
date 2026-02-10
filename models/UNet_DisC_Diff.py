@@ -45,7 +45,7 @@ class UNet_Basic(nn.Module):
     def __init__(
             self,
             image_size              = 64,
-            hr_condition            = False,
+            use_T2W                 = False,
             attention_resolutions   = (2, 4, 8),     # (4, 8, 16) if 128
             channel_mult            = (1, 2, 4, 8), # (1, 2, 4, 8, 8) if 128
             model_channels          = 96,
@@ -65,7 +65,8 @@ class UNet_Basic(nn.Module):
         super().__init__()
 
         self.image_size         = image_size
-        self.in_channels        = (3 if hr_condition else 2) if in_channels is None else in_channels
+        self.in_channels        = (3 if use_T2W else 2) if in_channels is None else in_channels
+        self.in_channels        = self.in_channels + 1 if self_condition else self.in_channels
         self.model_channels     = model_channels
         self.out_channels       = 1 
         self.num_res_blocks     = num_res_blocks
@@ -85,7 +86,7 @@ class UNet_Basic(nn.Module):
         self.input_img_channels = 1
         self.mask_channels      = 1
         self.controlnet         = None
-        self.concat_t2w         = hr_condition
+        self.concat_t2w         = use_T2W
 
         # Time embedding
         time_embed_dim = model_channels * 4
@@ -263,10 +264,8 @@ class UNet_Basic(nn.Module):
         # concatenate inputs 
         if t2w is not None:
             h = torch.cat([x, low_res, t2w], dim=1).type(self.dtype)
-            assert self.in_channels == 3, "hr_condition=False (in_channels=2) but t2w is not None"
         else:
             h = torch.cat([x, low_res], dim=1).type(self.dtype)
-            assert self.in_channels == 2, "hr_condition=True (in_channels=3) but t2w is None"
 
         # encoder + skips
         for idx in range(len(self.input_blocks)):
