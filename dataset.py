@@ -40,6 +40,7 @@ class MyDataset(Dataset):
         self.upsample   = 'x4' if upsample else ''
         self.t2w_embed  = t2w_embed
         self.use_T2W    = t2w or t2w_embed
+        self.use_HBV    = False # Not currently used, but could be added similarly to T2W
         self.data_type  = data_type
         self.blank_prob = blank_prob
         
@@ -77,6 +78,14 @@ class MyDataset(Dataset):
             
         if self.t2w_embed:
             sample['T2W_embed'] = self.t2w_model.get_all_embeddings(sample['T2W_condition'].unsqueeze(0))
+            
+        if self.use_HBV:
+            # hbv = Image.new('L', t2w.size, 0) # Test performance with blank image
+            # hbv = Image.open(f'{self.img_path}/HBV{self.masked}/{item["SID"]}').convert('L')
+            # sample['HBV_input'] = self.transforms['HBV'](t2w)
+            if self.processing == 'lowfield':
+                hbv = Image.open(f'{self.img_path}/HBV_lowfield/{item["SID"]}').convert('L')                
+            sample['HBV_condition'] = self.transforms['HBV'](hbv)
         
         img = Image.open(f'{self.img_path}/ADC{self.masked}/{item["SID"]}').convert('L')
         sample['ADC_input'] = self.transforms['ADC_input'](img)
