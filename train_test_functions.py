@@ -34,15 +34,18 @@ def get_img_size(args):
     
     return img_size
     
-    
 def build_UNet(args, img_channels=1):
     img_size = get_img_size(args)
     
+    if args.unet_type == 'latent':
+        args.self_condition = False
+        
     if args.unet_type == 'basic':
         print('Building basic UNet (DiscDiff) model...')
         return UNet_Basic_DiscDiff(
             image_size      = img_size,
-            hr_condition    = args.use_T2W
+            use_T2W         = args.use_T2W,
+            self_condition  = args.self_condition,
         )
     elif args.unet_type == 'basic_old' or args.unet_type == 'latent':
         print('Building basic UNet (old) model...')
@@ -68,14 +71,23 @@ def build_UNet(args, img_channels=1):
         assert args.use_T2W is True
         return UNet_DisC_Diff(
             image_size      = img_size,
-            hr_condition    = args.use_T2W
+            use_T2W         = args.use_T2W,
+            self_condition  = args.self_condition,
         )
     elif args.unet_type == 'multitask':
         print('Building MultiTask model...')
         assert args.use_T2W is True     
         return UNet_MultiTask(
-            UNet_Basic_DiscDiff(image_size = img_size),
-            UNet_Basic_DiscDiff(image_size = img_size),
+            UNet_Basic_DiscDiff(
+                image_size      = img_size, 
+                self_condition  = args.self_condition,
+                use_checkpoint  = True
+            ),
+            UNet_Basic_DiscDiff(
+                image_size      = img_size, 
+                self_condition  = args.self_condition,
+                use_checkpoint  = True
+            ),
         )  
     else:
         raise ValueError(f"Unknown UNet type: {type}")
@@ -176,17 +188,17 @@ def build_trainer(args,diffusion,train_dataloader,test_dataloader,accelerator,ru
     else:
         image_loss_weights = None
       
-    if args.unet_type:
+    if args.unet_type == 'multitask':
         return Trainer_MultiTask(
             diffusion,
             train_dataloader,
             test_dataloader,
             accelerator,
-            use_t2w             = args.controlnet | args.use_T2W,
-            batch_size          = args.batch_size,
+            use_t2w             = (args.controlnet or args.use_T2W),
+            batch_size          = args.batch_size ,
             lr                  = args.lr,
             train_num_steps     = args.n_epochs,
-            gradient_accumulate_every = 2,
+            gradient_accumulate_every = 4,
             ema_decay           = args.ema_decay,
             amp                 = False,
             results_folder      = args.results_folder,
@@ -203,7 +215,7 @@ def build_trainer(args,diffusion,train_dataloader,test_dataloader,accelerator,ru
             train_dataloader,
             test_dataloader,
             accelerator,
-            use_t2w             = args.controlnet | args.use_T2W,
+            use_t2w             = (args.controlnet or args.use_T2W),
             finetune_controlnet = args.controlnet,
             batch_size          = args.batch_size,
             lr                  = args.lr,
