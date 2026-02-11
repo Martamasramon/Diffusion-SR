@@ -9,7 +9,7 @@ from train_test_functions import (
     set_device, load_data, build_trainer
 )
 sys.path.append('../models')
-from VAE import load_vae
+from models.VAE import load_vae
 
 def main():
     accelerator = Accelerator(split_batches=True, mixed_precision='no')

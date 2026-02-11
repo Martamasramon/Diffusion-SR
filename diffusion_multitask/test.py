@@ -1,3 +1,4 @@
+import os
 import sys
 sys.path.append('../')
 from test_functions import visualize_batch, evaluate_results

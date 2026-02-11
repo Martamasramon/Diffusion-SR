@@ -2,11 +2,6 @@ from accelerate import Accelerator
 from torch.utils.data import DataLoader
 
 import sys
-sys.path.append('../models')
-from Diffusion      import Diffusion
-from UNet_3D        import UNet_3D
-
-import sys
 sys.path.append('../')
 from dataset        import MyDataset3D
 from arguments      import args

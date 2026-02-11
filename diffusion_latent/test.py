@@ -1,3 +1,4 @@
+import os
 import sys
 sys.path.append('../')
 from test_functions import visualize_batch, evaluate_results
@@ -7,7 +8,7 @@ from train_test_functions import (
     set_device, load_data
 )
 sys.path.append('../models')
-from VAE import load_vae
+from models.VAE import load_vae
 
 def main():
     device    = set_device()
