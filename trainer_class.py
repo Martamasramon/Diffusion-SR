@@ -8,7 +8,7 @@ from tqdm.auto   import tqdm
 from ema_pytorch import EMA
 
 from models.network_utils import (
-    cycle, num_to_groups, has_int_squareroot, divisible_by, extract
+    cycle, num_to_groups, has_int_squareroot, divisible_by, extract, exists
 )
 from models.VAE import encode_latent, decode_latent
 from models.Diffusion   import Losses
@@ -403,19 +403,21 @@ class Trainer_MultiTask(Trainer):
         self,
         *args,
         save_t2w_samples: bool = True,
+        modality_dropout_p_adc: float = 0.0,
+        modality_dropout_p_t2w: float = 0.0,
         **kwargs
     ):
         super().__init__(*args, **kwargs)
 
         self.save_t2w_samples = save_t2w_samples
+        
+        self.modality_dropout_p_adc = modality_dropout_p_adc
+        self.modality_dropout_p_t2w = modality_dropout_p_t2w
 
         if self.vae is not None:
             self.image_loss = Losses()
             self.image_loss = self.accelerator.prepare(self.image_loss)
 
-    # -------------------------
-    # Helpers
-    # -------------------------
     def _move_batch_to_device(self, data: dict):
         for key, value in data.items():
             try:
@@ -527,10 +529,49 @@ class Trainer_MultiTask(Trainer):
         logs[f"{prefix}_recon_total"] = recon_total.mean()
 
         return loss, logs
+    
+    def _apply_modality_dropout(self, data: dict):
+        """
+        During training, randomly zero out ADC_condition and/or T2W_condition.
 
-    # -------------------------
-    # Core train/val loss
-    # -------------------------
+        - If exclusive: at most one modality is dropped per sample.
+        - Operates on whatever is in data (latent or image space), so call AFTER _maybe_encode_latents.
+        """
+        p_adc = float(self.modality_dropout_p_adc or 0.0)
+        p_t2w = float(self.modality_dropout_p_t2w or 0.0)
+        if p_adc <= 0.0 and p_t2w <= 0.0:
+            return data
+
+        device = self.accelerator.device
+
+        cond_adc = data.get("ADC_condition", None)
+        cond_t2w = data.get("T2W_condition", None)
+        if not isinstance(cond_adc, torch.Tensor) or not isinstance(cond_t2w, torch.Tensor):
+            return data
+        B = cond_adc.shape[0]
+
+        # per-sample categorical: {none, drop_adc, drop_t2w} -> p = [1 - p_adc - p_t2w, p_adc, p_t2w]
+        p_none = max(0.0, 1.0 - (p_adc + p_t2w))
+        probs = torch.tensor([p_none, p_adc, p_t2w], device=device, dtype=torch.float32)
+        probs = probs / probs.sum().clamp_min(1e-8)
+
+        # sample categories
+        cat = torch.multinomial(probs, num_samples=B, replacement=True)  # 0,1,2
+        drop_adc = (cat == 1)
+        drop_t2w = (cat == 2)
+
+        # broadcast masks to [B, C, H, W] (or any [B, ...])
+        while drop_adc.ndim < cond_adc.ndim:
+            drop_adc = drop_adc.view(*drop_adc.shape, 1)
+        while drop_t2w.ndim < cond_t2w.ndim:
+            drop_t2w = drop_t2w.view(*drop_t2w.shape, 1)
+
+        # zero-fill (blank condition)
+        data["ADC_condition"] = torch.where(drop_adc, torch.zeros_like(cond_adc), cond_adc)
+        data["T2W_condition"] = torch.where(drop_t2w, torch.zeros_like(cond_t2w), cond_t2w)
+
+        return data
+
     def calc_loss(self, train=True):
         if train:
             if self.finetune_controlnet:
@@ -554,9 +595,10 @@ class Trainer_MultiTask(Trainer):
         for _ in range(self.gradient_accumulate_every):
             data = next(dataloader)
 
-            # Move to device & encode latents if needed
+            # Move to device, encode latents (if needed) & apply modality dropout 
             data = self._move_batch_to_device(data)
             data = self._maybe_encode_latents(data)
+            data = self._apply_modality_dropout(data)
 
             with self.accelerator.autocast():
                 out = self.model(
@@ -601,9 +643,6 @@ class Trainer_MultiTask(Trainer):
 
         return data, total_loss, total_losses
 
-    # -------------------------
-    # Sampling
-    # -------------------------
     def sample_images(self, data):
         """
         Save grids of ADC and (optionally) T2W samples from EMA model.

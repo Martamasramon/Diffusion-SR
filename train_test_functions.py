@@ -209,7 +209,9 @@ def build_trainer(args,diffusion,train_dataloader,test_dataloader,accelerator,ru
             save_best_and_latest_only = True,
             wandb_run           = run,
             vae                 = vae,
-            image_loss_weights  = image_loss_weights
+            image_loss_weights  = image_loss_weights,
+            modality_dropout_p_adc = args.modality_drop_prob,
+            modality_dropout_p_t2w = args.modality_drop_prob,
         )
     else: 
         return Trainer(
