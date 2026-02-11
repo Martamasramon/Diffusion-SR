@@ -2,6 +2,7 @@ import torch
 from torch       import nn
 from random      import random
 from collections import namedtuple
+from functools   import partial
 
 from network_utils      import *
 from network_modules    import *
@@ -346,7 +347,7 @@ class Diffusion_MultiTask(Diffusion):
     @torch.no_grad()
     def sample(
         self,
-        cond_adc, cond_t2w,
+        adc, t2w,
         *,
         batch_size  = 16,
         return_all_timesteps = False,
@@ -360,7 +361,7 @@ class Diffusion_MultiTask(Diffusion):
           - if perform_uq: (adc_samples, t2w_samples) each shaped [B, R, C, H, W] (or [B, R, T, C, H, W] if return_all_timesteps)
           - else: (adc, t2w) each shaped [B, C, H, W] (or [B, T, C, H, W] if return_all_timesteps)
 
-        You must pass cond_adc and cond_t2w already on the correct device.
+        You must pass adc and t2w already on the correct device.
         """
         image_size = self.image_size
         channels = 1  # if yours differ, set from your training setup
@@ -383,8 +384,8 @@ class Diffusion_MultiTask(Diffusion):
                 g.manual_seed(int(s.item()))
                 adc, t2w = sample_fn(
                     shape,
-                    cond_adc,
-                    cond_t2w,
+                    adc,
+                    t2w,
                     control=control,
                     return_all_timesteps=return_all_timesteps,
                     generator=g
@@ -400,8 +401,8 @@ class Diffusion_MultiTask(Diffusion):
         else:
             return sample_fn(
                 shape,
-                cond_adc,
-                cond_t2w,
+                adc,
+                t2w,
                 control=control,
                 return_all_timesteps=return_all_timesteps,
                 generator=generator
