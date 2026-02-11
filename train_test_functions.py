@@ -81,11 +81,13 @@ def build_UNet(args, img_channels=1):
             UNet_Basic_DiscDiff(
                 image_size      = img_size, 
                 self_condition  = args.self_condition,
+                use_HBV         = args.use_HBV,
                 use_checkpoint  = True
             ),
             UNet_Basic_DiscDiff(
                 image_size      = img_size, 
                 self_condition  = args.self_condition,
+                use_HBV         = args.use_HBV,
                 use_checkpoint  = True
             ),
         )  

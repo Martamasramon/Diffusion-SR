@@ -55,8 +55,7 @@ class UNet_Basic(nn.Module):
             num_heads               = 4,
             num_head_channels       = 48,
             use_scale_shift_norm    = False,
-            resblock_updown         = False,
-            in_channels             = None
+            resblock_updown         = False
     ):
         super().__init__()
 
