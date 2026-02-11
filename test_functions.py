@@ -72,7 +72,7 @@ def add_batch_metrics_to_list(prediction, highres, mse_list, psnr_list, ssim_lis
     return mse_list, psnr_list, ssim_list
 
 
-def run_diffusion(diffusion, lowres, t2w_input, controlnet=False, perform_uq=False, num_rep=None):
+def run_diffusion(diffusion, lowres, t2w_input, controlnet=False, perform_uq=False, num_rep=None, multitask=False):
     """
     Unified diffusion sampling call.
     - lowres: the conditioned input (e.g., downsampled ADC)
@@ -88,8 +88,12 @@ def run_diffusion(diffusion, lowres, t2w_input, controlnet=False, perform_uq=Fal
     
     # Sampling is inference-only
     with torch.no_grad():
-        return diffusion.sample(lowres, **kwargs)
+        pred = diffusion.sample(lowres, **kwargs)
+        
+    if multitask:
+        pred = pred[0] # pred[1] is t2w -> deal with this later
 
+    return pred
 
 def get_target_prediction(batch, model_output, vae=None):
     """
