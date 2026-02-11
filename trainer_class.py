@@ -1,29 +1,18 @@
 import math
 from pathlib import Path
-from random import random
-from functools import partial
-from collections import namedtuple
 
 import torch
-from torch import nn
-from torch.cuda.amp import autocast
-import torch.nn.functional as F
-
 from torch.optim import Adam
 from torchvision import transforms as T, utils
-
-from einops import rearrange, reduce
-from tqdm.auto import tqdm
-
-import sys
-sys.path.append('/models')
-from network_utils   import *
-from network_modules import *
-from VAE import encode_latent, decode_latent
-from Diffusion   import Losses
+from tqdm.auto   import tqdm
 from ema_pytorch import EMA
-from transforms import downsample_transform
 
+from models.network_utils import (
+    cycle, num_to_groups, has_int_squareroot, divisible_by, extract
+)
+from models.VAE import encode_latent, decode_latent
+from models.Diffusion   import Losses
+from transforms import downsample_transform
 
 class Trainer(object):
     def __init__(
@@ -64,7 +53,7 @@ class Trainer(object):
         self.accelerator    = accelerator
         self.model          = diffusion_model
         self.channels       = diffusion_model.input_img_channels
-        is_ddim_sampling    = diffusion_model.is_ddim_sampling
+        self.is_ddim_sampling    = diffusion_model.is_ddim_sampling
 
         self.img_size       = img_size        
         self.use_T2W        = use_T2W
