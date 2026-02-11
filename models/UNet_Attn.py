@@ -2,10 +2,12 @@ import torch
 from torch import nn
 from functools import partial
 
-from network_utils   import exists, default
+from network_utils   import (
+    exists, default,
+    Downsample, Upsample
+)
 from network_modules import (
-    ResnetBlock, Downsample, Upsample,
-    Residual, PreNorm, LinearCrossAttention
+    ResnetBlock, Residual, PreNorm, LinearCrossAttention
 )
 from UNet_Basic import UNet_Basic
 
