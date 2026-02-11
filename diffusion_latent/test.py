@@ -1,6 +1,6 @@
 import sys
 sys.path.append('../')
-from test_functions import *
+from test_functions import visualize_batch, evaluate_results
 from arguments      import args
 from train_test_functions import (
     build_UNet, build_diffusion, load_model,
