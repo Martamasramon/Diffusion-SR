@@ -14,6 +14,7 @@ parser.add_argument('--beta_schedule',      type=str,  default='linear')
 parser.add_argument('--perct_λ',            type=float,default=0.1)
 parser.add_argument('--objective',          type=str,  default='pred_v')
 parser.add_argument('--modality_drop_prob', type=float,default=0.1)
+parser.add_argument('--noise_rho',          type=float,default=0.8)
 parser.add_argument('--no_cross_attn',      action='store_false', dest='cross_attention')
 parser.set_defaults(cross_attention = True)
 # Image recon for latent diffusion

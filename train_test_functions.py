@@ -110,7 +110,8 @@ def build_diffusion(args, model, auto_normalize=True):
             loss_weights        = {'mse':1, 'ssim':0, 'perct':args.perct_λ},
             loss_weights_t2w    = {'mse':1, 'ssim':0, 'perct':args.perct_λ},
             auto_normalize      = auto_normalize,
-            objective           = args.objective
+            objective           = args.objective,
+            noise_rho           = args.noise_rho,
         )
     else:
         print('Building Diffusion model...')
