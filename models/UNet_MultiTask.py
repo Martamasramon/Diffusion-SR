@@ -109,11 +109,13 @@ class UNet_MultiTask(nn.Module):
         cross_decoder:   bool = True,
         cross_middle:    bool = True,
         gate_init:       float = 0.0,
+        cross_attention: bool = True
     ):
         super().__init__()
         self.adc = unet_adc
         self.t2w = unet_t2w
-
+        self.cross_attention = cross_attention
+        
         # Make it compatible with your Diffusion wrapper assumptions
         self.input_img_channels = 1
         self.mask_channels      = 1
@@ -122,34 +124,42 @@ class UNet_MultiTask(nn.Module):
         self.use_T2W         = False
 
         # Cross-attn modules: one per block index (encoder + decoder), plus optional middle.
-        self.cross_encoder = cross_encoder
-        self.cross_decoder = cross_decoder
-        self.cross_middle  = cross_middle
+        self.cross_encoder = cross_encoder and cross_attention
+        self.cross_decoder = cross_decoder and cross_attention
+        self.cross_middle  = cross_middle  and cross_attention
 
         # Encoder blocks count must match for lockstep stepping
         assert len(self.adc.input_blocks)  == len(self.t2w.input_blocks),  "ADC and T2W UNets must have same number of input_blocks"
         assert len(self.adc.output_blocks) == len(self.t2w.output_blocks), "ADC and T2W UNets must have same number of output_blocks"
 
-        ## Attention modules are bidirectional, but we use separate modules so each direction can learn independently
-        # Encoder cross-attn modules
-        self.xattn_enc_adc = nn.ModuleList([
-            _CrossAttnResidual2D(num_heads=num_heads, gate_init=gate_init) for _ in range(len(self.adc.input_blocks))
-        ])
-        self.xattn_enc_t2w = nn.ModuleList([
-            _CrossAttnResidual2D(num_heads=num_heads, gate_init=gate_init) for _ in range(len(self.t2w.input_blocks))
-        ])
-        
-        # Mid cross-attn modules
-        self.xattn_mid_adc = _CrossAttnResidual2D(num_heads=num_heads, gate_init=gate_init)
-        self.xattn_mid_t2w = _CrossAttnResidual2D(num_heads=num_heads, gate_init=gate_init)
-        
-        # Decoder cross-attn modules
-        self.xattn_dec_adc = nn.ModuleList([
-            _CrossAttnResidual2D(num_heads=num_heads, gate_init=gate_init) for _ in range(len(self.adc.output_blocks))
-        ])
-        self.xattn_dec_t2w = nn.ModuleList([
-            _CrossAttnResidual2D(num_heads=num_heads, gate_init=gate_init) for _ in range(len(self.t2w.output_blocks))
-        ])
+        if self.cross_attention:
+            ## Attention modules are bidirectional, but we use separate modules so each direction can learn independently
+            # Encoder
+            self.xattn_enc_adc = nn.ModuleList([
+                _CrossAttnResidual2D(num_heads=num_heads, gate_init=gate_init) for _ in range(len(self.adc.input_blocks))
+            ])
+            self.xattn_enc_t2w = nn.ModuleList([
+                _CrossAttnResidual2D(num_heads=num_heads, gate_init=gate_init) for _ in range(len(self.t2w.input_blocks))
+            ])
+            
+            # Middle
+            self.xattn_mid_adc = _CrossAttnResidual2D(num_heads=num_heads, gate_init=gate_init)
+            self.xattn_mid_t2w = _CrossAttnResidual2D(num_heads=num_heads, gate_init=gate_init)
+            
+            # Decoder 
+            self.xattn_dec_adc = nn.ModuleList([
+                _CrossAttnResidual2D(num_heads=num_heads, gate_init=gate_init) for _ in range(len(self.adc.output_blocks))
+            ])
+            self.xattn_dec_t2w = nn.ModuleList([
+                _CrossAttnResidual2D(num_heads=num_heads, gate_init=gate_init) for _ in range(len(self.t2w.output_blocks))
+            ])
+        else:
+            self.xattn_enc_adc = None
+            self.xattn_enc_t2w = None
+            self.xattn_mid_adc = None
+            self.xattn_mid_t2w = None
+            self.xattn_dec_adc = None
+            self.xattn_dec_t2w = None
         
 
     def forward(

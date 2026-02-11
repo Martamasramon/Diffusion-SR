@@ -90,6 +90,7 @@ def build_UNet(args, img_channels=1):
                 use_HBV         = args.use_HBV,
                 use_checkpoint  = True
             ),
+            cross_attention = args.cross_attention,
         )  
     else:
         raise ValueError(f"Unknown UNet type: {type}")
