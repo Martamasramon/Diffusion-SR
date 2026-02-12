@@ -59,7 +59,7 @@ def train_model(model, train_dataloader, val_dataloader, criterion, optimizer, d
 
     for epoch in range(1, num_epochs+1):
 
-        print(f'Epoch {epoch}/{num_epochs}')
+        print(f'\nEpoch {epoch}/{num_epochs}')
 
         train_epoch_labels, train_epoch_preds, train_epoch_loss, train_epoch_accuracy, train_epoch_class_accuracy = train_single_epoch(model, train_dataloader, criterion, optimizer, device)
         train_losses.append(train_epoch_loss)
