@@ -19,6 +19,7 @@ class MyDataset(Dataset):
         image_size      = 64,
         t2w             = False, 
         t2w_embed       = False, 
+        hbv             = False,
         is_finetune     = False, 
         surgical_only   = False,
         t2w_model_drop  = [0.1,0.5],
@@ -40,7 +41,7 @@ class MyDataset(Dataset):
         self.upsample   = 'x4' if upsample else ''
         self.t2w_embed  = t2w_embed
         self.use_T2W    = t2w or t2w_embed
-        self.use_HBV    = False # Not currently used, but could be added similarly to T2W
+        self.use_HBV    = hbv 
         self.data_type  = data_type
         self.blank_prob = blank_prob
         
@@ -85,7 +86,7 @@ class MyDataset(Dataset):
             # sample['HBV_input'] = self.transforms['HBV'](t2w)
             if self.processing == 'lowfield':
                 hbv = Image.open(f'{self.img_path}/HBV_lowfield/{item["SID"]}').convert('L')                
-            sample['HBV_condition'] = self.transforms['HBV'](hbv)
+            sample['HBV'] = self.transforms['HBV'](hbv)
         
         img = Image.open(f'{self.img_path}/ADC{self.masked}/{item["SID"]}').convert('L')
         sample['ADC_input'] = self.transforms['ADC_input'](img)

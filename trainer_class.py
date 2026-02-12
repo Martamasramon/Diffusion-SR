@@ -197,7 +197,7 @@ class Trainer(object):
             with self.accelerator.autocast():
                 control = data['T2W_condition'] if self.model.controlnet else None
                 t2w_in  = data['T2W_condition'] if (self.use_T2W and self.model.controlnet is None) else None
-                hbv_in  = data['HBV_condition'] if self.use_HBV else None
+                hbv_in  = data['HBV'] if self.use_HBV else None
                 if 'ADC_target' in data.keys():
                     defined_target = data['ADC_target'] 
                     eval_transform = downsample_transform(self.img_size) 
@@ -208,9 +208,9 @@ class Trainer(object):
 
                 if self.use_T2W_embed:
                     data['T2W_embed'] = [t.squeeze(1) for t in data['T2W_embed']]
-                    prediction, loss, losses['mse'], losses['perct'], losses['ssim'], t = self.model(data['ADC_input'], data['ADC_condition'], data['T2W_embed'], control, defined_target, eval_transform, condition_hbv=hbv_in)
+                    prediction, loss, losses['mse'], losses['perct'], losses['ssim'], t = self.model(data['ADC_input'], data['ADC_condition'], data['T2W_embed'], hbv_in, control, defined_target, eval_transform)
                 else:
-                    prediction, loss, losses['mse'], losses['perct'], losses['ssim'], t = self.model(data['ADC_input'], data['ADC_condition'], t2w_in,            control,  defined_target, eval_transform, condition_hbv=hbv_in)
+                    prediction, loss, losses['mse'], losses['perct'], losses['ssim'], t = self.model(data['ADC_input'], data['ADC_condition'], t2w_in           , hbv_in, control, defined_target, eval_transform)
                 
                 if self.vae is not None and self.image_loss_weights is not None:
                     reconstruction = decode_latent(prediction, self.vae)[:, 0, :, :].unsqueeze(1) 
@@ -248,7 +248,7 @@ class Trainer(object):
             batches         = num_to_groups(self.num_samples, self.batch_size)
             sample_lowres   = data['ADC_condition'][:self.num_samples].to(self.accelerator.device)
             sample_t2w      = data['T2W_condition'][:self.num_samples].to(self.accelerator.device) if (self.model.controlnet is not None) or self.model.use_T2W else None
-            sample_hbv      = data['HBV_condition'][:self.num_samples].to(self.accelerator.device) if self.model.use_HBV else None
+            sample_hbv      = data['HBV'][:self.num_samples].to(self.accelerator.device) if self.model.use_HBV else None
             
             if 'T2W_embed' in data:
                 sample_t2w_embed = []
