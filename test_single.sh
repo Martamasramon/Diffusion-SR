@@ -7,7 +7,7 @@
 #$ -V
 
 #$ -wd /cluster/project7/ProsRegNet_CellCount/CriDiff/
-#$ -N Train_diffusion
+#$ -N Test_diffusion
 
 date
 nvidia-smi
@@ -18,8 +18,8 @@ export LD_LIBRARY_PATH=/share/apps/python-3.9.5-shared/lib:$LD_LIBRARY_PATH
 source /cluster/project7/ProsRegNet_CellCount/CriDiff/CriDiff_env/bin/activate
 export PATH="/cluster/project7/ProsRegNet_CellCount/CriDiff/CriDiff_env/bin:$PATH"
 
-cd diffusion_basic 
+cd diffusion_multitask
 
-python3 train.py --results_folder './lowfield_concat_t2w' --use_T2W 
+python3 test.py --checkpoint './test_full/model-best.pt'  --use_T2W --unet_type 'multitask'
 
 date
