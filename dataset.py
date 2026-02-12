@@ -46,7 +46,8 @@ class MyDataset(Dataset):
         self.blank_prob = blank_prob
         
         self.processing = 'lowfield' if lowfield else 'upsample' if upsample else 'offset' if t2w_offset else None
-        self.img_dict   = pd.read_csv(f'/cluster/project7/ProsRegNet_CellCount/Dataset_preparation/CSV/{root}_{self.processing}{self.masked}_{data_type}.csv')
+        csv_name = f'{self.processing}_HBV_{data_type}' if hbv else f'{root}_{self.processing}{self.masked}_{data_type}'
+        self.img_dict   = pd.read_csv(f'/cluster/project7/ProsRegNet_CellCount/Dataset_preparation/CSV/{csv_name}.csv')
         self.transforms = get_transforms(2, image_size, downsample, type=self.processing)
             
         print('\n', data_type)
