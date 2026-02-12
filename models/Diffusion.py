@@ -68,6 +68,7 @@ class Diffusion(nn.Module):
         
         self.controlnet = self.model.controlnet 
         self.use_T2W    = self.model.use_T2W
+        self.use_HBV    = self.model.use_HBV
                 
         self.channels = self.model.input_img_channels
 
@@ -175,8 +176,8 @@ class Diffusion(nn.Module):
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
 
-    def model_predictions(self, x, low_res, t, x_self_cond = None, control=None, t2w=None, clip_x_start = False, rederive_pred_noise = False):
-        model_output = self.model.forward(x, low_res, t, x_self_cond, control=control, t2w=t2w)
+    def model_predictions(self, x, low_res, t, x_self_cond = None, control=None, t2w=None, hbv=None, clip_x_start = False, rederive_pred_noise = False):
+        model_output = self.model.forward(x, low_res, t, x_self_cond, control=control, t2w=t2w, hbv=hbv)
         maybe_clip  = partial(torch.clamp, min = -1., max = 1.) if clip_x_start else identity
 
         if self.objective == 'pred_noise':
@@ -201,8 +202,8 @@ class Diffusion(nn.Module):
         return ModelPrediction(pred_noise, x_start)
     
 
-    def p_mean_variance(self, x, low_res, t, x_self_cond = None, control=None, t2w=None, clip_denoised = True):
-        preds = self.model_predictions(x, low_res, t, x_self_cond, control=control, t2w=t2w)
+    def p_mean_variance(self, x, low_res, t, x_self_cond = None, control=None, t2w=None, hbv=None, clip_denoised = True):
+        preds = self.model_predictions(x, low_res, t, x_self_cond, control=control, t2w=t2w, hbv=hbv)
         x_start = preds.x_start
 
         if clip_denoised:
@@ -213,18 +214,18 @@ class Diffusion(nn.Module):
 
 
     @torch.no_grad()
-    def p_sample(self, x, low_res, t, x_self_cond=None, control=None, t2w=None):
+    def p_sample(self, x, low_res, t, x_self_cond=None, control=None, t2w=None, hbv=None):
         b, *_, device = *x.shape, self.device
         batched_times = torch.full((b,), t, device = device, dtype = torch.long)
         
-        model_mean, _, model_log_variance, x_start = self.p_mean_variance(x, low_res, batched_times, x_self_cond, clip_denoised=True, control=control, t2w=t2w)
+        model_mean, _, model_log_variance, x_start = self.p_mean_variance(x, low_res, batched_times, x_self_cond, clip_denoised=True, control=control, t2w=t2w, hbv=hbv)
         noise       = torch.randn_like(x) if t > 0 else 0. # no noise if t == 0
         pred_img    = model_mean + (0.5 * model_log_variance).exp() * noise
         return pred_img, x_start
 
 
     @torch.no_grad()
-    def p_sample_loop(self, shape, low_res, control=None, return_all_timesteps = False, t2w=None):
+    def p_sample_loop(self, shape, low_res, control=None, return_all_timesteps = False, t2w=None, hbv=None):
         batch, device = shape[0], self.device
         img           = torch.randn(shape, device = device)
         imgs          = [img]
@@ -233,7 +234,7 @@ class Diffusion(nn.Module):
         # for t in tqdm(reversed(range(0, self.num_timesteps)), desc = 'sampling loop time step', total = self.num_timesteps):
         for t in reversed(range(0, self.num_timesteps)):
             self_cond = x_start if self.self_condition else None
-            img, x_start = self.p_sample(img, low_res, t, x_self_cond=self_cond, control=control, t2w=t2w)
+            img, x_start = self.p_sample(img, low_res, t, x_self_cond=self_cond, control=control, t2w=t2w, hbv=hbv)
             imgs.append(img)
 
         img = img if not return_all_timesteps else torch.stack(imgs, dim = 1)
@@ -242,7 +243,7 @@ class Diffusion(nn.Module):
 
 
     @torch.no_grad()
-    def ddim_sample(self, shape, low_res, control=None, return_all_timesteps = False, t2w=None, generator=None):
+    def ddim_sample(self, shape, low_res, control=None, return_all_timesteps = False, t2w=None, hbv=None, generator=None):
         batch, device, total_timesteps, sampling_timesteps, eta, objective = shape[0], self.device, self.num_timesteps, self.sampling_timesteps, self.ddim_sampling_eta, self.objective
 
         times = torch.linspace(-1, total_timesteps - 1, steps = sampling_timesteps + 1)   # [-1, 0, 1, 2, ..., T-1] when sampling_timesteps == total_timesteps
@@ -257,7 +258,7 @@ class Diffusion(nn.Module):
         for time, time_next in time_pairs:
             time_cond = torch.full((batch,), time, device = device, dtype = torch.long)
             self_cond = x_start if self.self_condition else None
-            preds   = self.model_predictions(img, low_res, time_cond, self_cond, clip_x_start = True, rederive_pred_noise = True, control=control, t2w=t2w)
+            preds   = self.model_predictions(img, low_res, time_cond, self_cond, clip_x_start = True, rederive_pred_noise = True, control=control, t2w=t2w, hbv=hbv)
             x_start = preds.x_start
             
             if time_next < 0:
@@ -284,7 +285,7 @@ class Diffusion(nn.Module):
         return ret
 
     @torch.no_grad()
-    def sample(self, low_res, control=None, batch_size = 16, return_all_timesteps = False, t2w=None, perform_uq=False, num_rep=None):
+    def sample(self, low_res, control=None, batch_size = 16, return_all_timesteps = False, t2w=None, hbv=None, perform_uq=False, num_rep=None):
         image_size, channels = self.image_size, self.channels
         sample_fn            = self.p_sample_loop if not self.is_ddim_sampling else self.ddim_sample
 
@@ -299,7 +300,7 @@ class Diffusion(nn.Module):
                 generator = torch.Generator(device=self.device)
                 generator.manual_seed(seed.item())
                 # torch.cuda.manual_seed(seed.item())
-                img_pred = sample_fn((batch_size, channels, image_size, image_size), low_res, control=control, return_all_timesteps = return_all_timesteps, t2w=t2w, generator=generator)
+                img_pred = sample_fn((batch_size, channels, image_size, image_size), low_res, control=control, return_all_timesteps = return_all_timesteps, t2w=t2w, hbv=hbv, generator=generator)
                 imgs_pred.append(img_pred)
             
             imgs_pred = torch.stack(imgs_pred, dim=1)  # Shape: (batch_size, num_reruns, C, H, W)
@@ -309,11 +310,11 @@ class Diffusion(nn.Module):
             return imgs_pred # Return all samples for uncertainty quantification
 
         else:
-            return sample_fn((batch_size, channels, image_size, image_size), low_res, control=control, return_all_timesteps = return_all_timesteps, t2w=t2w)
+            return sample_fn((batch_size, channels, image_size, image_size), low_res, control=control, return_all_timesteps = return_all_timesteps, t2w=t2w, hbv=hbv)
 
 
     @autocast('cuda', enabled = False)
-    def q_sample(self, x_start, t, t2w=None, noise = None):
+    def q_sample(self, x_start, t, noise = None):
         noise = default(noise, lambda: torch.randn_like(x_start))
 
         return (extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start +
@@ -325,6 +326,7 @@ class Diffusion(nn.Module):
                 t, 
                 control, 
                 t2w, 
+                hbv,
                 defined_target,             
                 eval_transform,
                 noise   = None, 
@@ -339,12 +341,12 @@ class Diffusion(nn.Module):
         x_self_cond = None
         if self.self_condition and random() < 0.5:
             with torch.no_grad():
-                x_self_cond = self.model_predictions(x,low_res, t, control=control, t2w=t2w).x_start  
+                x_self_cond = self.model_predictions(x,low_res, t, control=control, t2w=t2w, hbv=hbv).x_start  
                 x_self_cond.detach_()
 
         # predict and take gradient step
-        prediction   = self.model(x, low_res, t, x_self_cond, control=control, t2w=t2w)
-        x_start_pred = self.model_predictions(x, low_res, t, x_self_cond=x_self_cond, control=control, t2w=t2w).x_start   # predicted clean latent
+        prediction   = self.model(x, low_res, t, x_self_cond, control=control, t2w=t2w, hbv=hbv)
+        x_start_pred = self.model_predictions(x, low_res, t, x_self_cond=x_self_cond, control=control, t2w=t2w, hbv=hbv).x_start   # predicted clean latent
 
         if self.objective == 'pred_noise':
             target = noise  
@@ -376,6 +378,7 @@ class Diffusion(nn.Module):
                 input_img, 
                 condition_adc, 
                 condition_t2w  = None, 
+                condition_hbv  = None,  
                 control        = None, 
                 defined_target = None,             
                 eval_transform = None,
@@ -386,4 +389,4 @@ class Diffusion(nn.Module):
         assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
         t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
         
-        return self.p_losses(self.normalize(input_img), condition_adc, t, control, condition_t2w, defined_target, eval_transform, *args, **kwargs)
+        return self.p_losses(self.normalize(input_img), condition_adc, t, control, condition_t2w, condition_hbv, defined_target, eval_transform, *args, **kwargs)
