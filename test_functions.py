@@ -72,7 +72,7 @@ def add_batch_metrics_to_list(prediction, highres, mse_list, psnr_list, ssim_lis
     return mse_list, psnr_list, ssim_list
 
 
-def run_diffusion(diffusion, lowres, t2w_input, controlnet=False, perform_uq=False, num_rep=None, multitask=False):
+def run_diffusion(diffusion, lowres, t2w_input, unet_type, controlnet=False, perform_uq=False, num_rep=None):
     """
     Unified diffusion sampling call.
     - lowres: the conditioned input (e.g., downsampled ADC)
@@ -90,7 +90,7 @@ def run_diffusion(diffusion, lowres, t2w_input, controlnet=False, perform_uq=Fal
     with torch.no_grad():
         pred = diffusion.sample(lowres, **kwargs)
         
-    if multitask:
+    if unet_type == 'multitask':
         pred = pred[0] # pred[1] is t2w -> deal with this later
 
     return pred
@@ -175,7 +175,7 @@ def log_metrics_to_csv(args, mse, psnr,ssim,csv_path='/cluster/project7/ProsRegN
         writer.writerow(row)
 
 
-def evaluate_results(args, diffusion, dataloader, device, batch_size, use_T2W=False, controlnet=False, vae=None):
+def evaluate_results(args, diffusion, dataloader, device, vae=None):
     """
     Iterate over dataloader and compute average MSE/PSNR/SSIM over all samples.
     """
@@ -183,10 +183,10 @@ def evaluate_results(args, diffusion, dataloader, device, batch_size, use_T2W=Fa
     
     for batch in dataloader:
         # Base conditioning input, Optional T2W for the diffusion model
-        _, lowres, t2w_input, _ = get_batch_images(dataloader, device, use_T2W, vae, batch)
+        _, lowres, t2w_input, _ = get_batch_images(dataloader, device, args.use_T2W, vae, batch)
 
         # Sample SR output
-        model_output  = run_diffusion(diffusion, lowres, t2w_input, controlnet)
+        model_output  = run_diffusion(diffusion, lowres, t2w_input, args.unet_type, args.controlnet)
                     
         # Align prediction/target if necessary
         target, prediction = get_target_prediction(batch, model_output, vae)
@@ -414,8 +414,8 @@ def decode_all_UQ(pred,vae):
     return decoded_x0, pred_mean, pred_std
 
 def visualize_batch(
-    diffusion, dataloader, batch_size, device,
-    use_T2W=False, controlnet=False, output_name="test_image", vae=None, add_error=True, perform_uq=False, num_rep=None
+    args, diffusion, dataloader, device,
+    controlnet=False, output_name="test_image", vae=None, add_error=True, perform_uq=False, num_rep=None
 ):
     """
     Visualize a single batch:
@@ -432,12 +432,12 @@ def visualize_batch(
 
     uq_t2w_overlay = False # Set to False for now; could be set to True if the overlay plot is desired after enabling T2W input
 
-    fig, axes, ncols = create_plot(batch_size, use_T2W, num_rep=num_rep, add_error=add_error, avg_std=avg_std, uq_t2w_overlay=uq_t2w_overlay)
-    highres, lowres, t2w_input, batch = get_batch_images(dataloader, device, use_T2W, vae)
+    fig, axes, ncols = create_plot(args.batch_size, args.use_T2W, num_rep=num_rep, add_error=add_error, avg_std=avg_std, uq_t2w_overlay=uq_t2w_overlay)
+    highres, lowres, t2w_input, batch = get_batch_images(dataloader, device, args.use_T2W, vae)
     
     # Run model sampling
     if diffusion is not None:
-        pred = run_diffusion(diffusion, lowres, t2w_input, controlnet, perform_uq, num_rep)
+        pred = run_diffusion(diffusion, lowres, t2w_input, args.unet_type, args.controlnet, perform_uq, num_rep)
         
         if perform_uq:
             decoded_x0, pred_mean, pred_std = decode_all_UQ(pred, vae)
@@ -455,17 +455,17 @@ def visualize_batch(
     #         lowres[i] = cv2.resize(lowres[i], (full_size,full_size), interpolation=cv2.INTER_LINEAR)
     #     lowres    = lowres.to(device)
     
-    if use_T2W:
+    if args.use_T2W:
         t2w_input = get_t2w_input(batch, device)
     
-    for i in range(batch_size):
+    for i in range(args.batch_size):
         count = 0
         # Column 0: lowres input
         plot_image(lowres[i], fig, axes, i, 0)
         
         if num_rep is None:
             # Column 1 (optional): T2W input
-            if use_T2W:
+            if args.use_T2W:
                 count += 1                    
                 if "T2W_embed" in batch:
                     plot_image(t2w_input[0][i], fig, axes, i, 1)
@@ -482,7 +482,7 @@ def visualize_batch(
                 count += 2
                 
         else:
-            if use_T2W:
+            if args.use_T2W:
                 count += 1
                 # Add t2w_embed stuff?
                 plot_image(t2w_input[i], fig, axes, i, 1)
@@ -500,7 +500,7 @@ def visualize_batch(
         plot_image(highres[i], fig, axes, i, count+1)
 
         # T2W with uncertainty overlay (optional)
-        if use_T2W and uq_t2w_overlay:
+        if args.use_T2W and uq_t2w_overlay:
             plot_uq_t2w_overlay(t2w_input[i], pred_std[i], fig, axes, i, ncols-2)
     
         # UQ error column (optional)
@@ -519,21 +519,20 @@ def visualize_batch(
 
 
 def visualize_variability(
-    diffusion, dataloader, batch_size, device,
-    use_T2W=False, controlnet=False,
+    args, diffusion, dataloader, device, 
     output_name="test_image", num_rep=5, avg_std=False, vae=None
 ):
     """
     Visualize variability by sampling multiple SR outputs for the same input.
     Optionally show mean/std over repetitions.
     """
-    fig, axes, ncols = create_plot(batch_size, use_T2W, num_rep=num_rep, offset=False, add_error=False, avg_std=avg_std)
-    highres, lowres, t2w_input, _ = get_batch_images(dataloader, device, use_T2W, vae)
+    fig, axes, ncols = create_plot(args.batch_size, args.use_T2W, num_rep=num_rep, offset=False, add_error=False, avg_std=avg_std)
+    highres, lowres, t2w_input, _ = get_batch_images(dataloader, device, args.use_T2W, vae)
     
     # Collect multiple stochastic samples
     all_pred = []
     for rep in range(num_rep):
-        pred = run_diffusion(diffusion, lowres, t2w_input, controlnet)
+        pred = run_diffusion(diffusion, lowres, t2w_input, args.unet_type, args.controlnet)
         all_pred.append(format_image(pred))
         
     all_pred = np.array(all_pred)
@@ -543,12 +542,12 @@ def visualize_variability(
         mean_pred = np.mean(all_pred, axis=0)                 
         std_pred  = np.std(all_pred, axis=0)
 
-    count = 1 if use_T2W else 0
-    for i in range(batch_size):
+    count = 1 if args.use_T2W else 0
+    for i in range(args.batch_size):
         # Column 0: lowres
         plot_image(lowres[i], fig, axes, i, 0)
         # Column 1 (optional): T2W
-        if use_T2W:
+        if args.use_T2W:
             plot_image(t2w_input[i], fig, axes, i, 1)
         # Repetition columns: SR outputs
         for rep in range(num_rep):
@@ -568,9 +567,8 @@ def visualize_variability(
 
 
 def visualize_variability_t2w(
-    diffusion, dataloader, batch_size, device,
-    controlnet=False, output_name="test_image",
-    num_rep=5, avg_std=False
+    args, diffusion, dataloader, device, 
+    output_name="test_image", num_rep=5, avg_std=False
 ):
     """
     Visualize variability when the T2W input itself can vary per repetition
@@ -580,8 +578,8 @@ def visualize_variability_t2w(
       - apply dataset transform
       - sample diffusion output conditioned on that T2W
     """
-    fig, axes, ncols = create_plot(batch_size, True, num_rep=num_rep, offset=True, add_error=False, avg_std=avg_std)
-    highres, lowres, _, batch = get_batch_images(dataloader, device, use_T2W=False)
+    fig, axes, ncols = create_plot(args.batch_size, True, num_rep=num_rep, offset=True, add_error=False, avg_std=avg_std)
+    highres, lowres, _, batch = get_batch_images(dataloader, device, args.use_T2W)
     
     all_pred = []
     all_t2w  = []
@@ -598,7 +596,7 @@ def visualize_variability_t2w(
         t2w_input = torch.stack(t2w_batch, dim=0).to(device)
         
         # Sample conditioned output
-        pred = run_diffusion(diffusion, lowres, t2w_input, controlnet)
+        pred = run_diffusion(diffusion, lowres, t2w_input, args.unet_type, args.controlnet)
                 
         # Store for later plotting
         all_pred.append(format_image(pred))
