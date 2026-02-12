@@ -670,8 +670,8 @@ class Trainer_MultiTask(Trainer):
 
                 # EMA model returns (adc, t2w) for multitask sample()
                 adc_s, t2w_s = self.ema.ema_model.sample(
-                    cond_adc=cond_adc,
-                    t2w     =cond_t2w,
+                    adc = cond_adc,
+                    t2w = cond_t2w,
                     batch_size=cond_adc.shape[0],
                     return_all_timesteps=False
                 )
