@@ -275,8 +275,8 @@ class Diffusion(nn.Module):
             noise = torch.randn(img.shape,device=img.device,dtype=img.dtype,generator=generator)
 
             img = preds.x_start * alpha_next.sqrt() + \
-                  c * preds.pred_noise + \
-                  sigma * noise
+                c * preds.pred_noise + \
+                sigma * noise
 
             imgs.append(img)
 
@@ -326,9 +326,9 @@ class Diffusion(nn.Module):
                 t, 
                 control, 
                 t2w, 
-                hbv,
-                defined_target,             
-                eval_transform,
+                hbv=None,
+                defined_target=None,             
+                eval_transform=None,
                 noise   = None, 
         ):
         b, c, h, w              = x_start.shape
@@ -374,16 +374,17 @@ class Diffusion(nn.Module):
         return self.unnormalize(x_start_pred), loss.mean(), mse_loss, perct_loss, ssim_loss, t
 
 
-    def forward(self, 
-                input_img, 
-                condition_adc, 
-                condition_t2w  = None, 
-                condition_hbv  = None,  
-                control        = None, 
-                defined_target = None,             
-                eval_transform = None,
-                *args, 
-                **kwargs
+    def forward(
+            self, 
+            input_img, 
+            condition_adc, 
+            condition_t2w  = None, 
+            condition_hbv  = None,
+            control        = None, 
+            defined_target = None,             
+            eval_transform = None,
+            *args, 
+            **kwargs
         ):
         b, c, h, w, device, img_size, = *input_img.shape, input_img.device, self.image_size
         assert h == img_size and w == img_size, f'height and width of image must be {img_size}'

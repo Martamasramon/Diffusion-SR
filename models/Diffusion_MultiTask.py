@@ -31,7 +31,6 @@ class Diffusion_MultiTask(Diffusion):
         print("  ADC loss weights:", self.loss_weights_adc)
         print("  T2W loss weights:", self.loss_weights_t2w)
 
-    # ---------- helpers ----------
     def _correlated_noise(self, shape, device, dtype, generator=None):
         """
         Returns (eps_adc, eps_t2w) with correlation rho.
@@ -88,13 +87,13 @@ class Diffusion_MultiTask(Diffusion):
         return torch.randn(x.shape, device=x.device, dtype=x.dtype, generator=generator)
 
     # ------------------------------------------------------------------------------
-    # ------------------------------------------------------------------------------
     def model_predictions_mt(
         self,
         x_adc, cond_adc,
         x_t2w, cond_t2w,
         t,
         *,
+        cond_hbv=None,
         x_self_cond_adc=None, x_self_cond_t2w=None,
         control      = None,
         clip_x_start = False,
@@ -111,7 +110,8 @@ class Diffusion_MultiTask(Diffusion):
             t,
             x_self_cond_adc=x_self_cond_adc,
             x_self_cond_t2w=x_self_cond_t2w,
-            control=control
+            control=control,
+            hbv=cond_hbv,
         )
 
         maybe_clip = partial(torch.clamp, min=-1., max=1.) if clip_x_start else (lambda z: z)
@@ -151,6 +151,7 @@ class Diffusion_MultiTask(Diffusion):
         x_t2w, cond_t2w,
         t,
         *,
+        cond_hbv=None,
         x_self_cond_adc=None, x_self_cond_t2w=None,
         control       = None,
         clip_denoised = True
@@ -165,6 +166,7 @@ class Diffusion_MultiTask(Diffusion):
             x_self_cond_adc=x_self_cond_adc,
             x_self_cond_t2w=x_self_cond_t2w,
             control=control,
+            cond_hbv=cond_hbv,
             clip_x_start=clip_denoised,
             rederive_pred_noise=True
         )
@@ -185,6 +187,7 @@ class Diffusion_MultiTask(Diffusion):
         x_t2w, cond_t2w,
         t_scalar: int,
         *,
+        cond_hbv=None,
         x_self_cond_adc=None, x_self_cond_t2w=None,
         control   = None,
         generator = None
@@ -201,6 +204,7 @@ class Diffusion_MultiTask(Diffusion):
             x_self_cond_adc=x_self_cond_adc,
             x_self_cond_t2w=x_self_cond_t2w,
             control=control,
+            cond_hbv=cond_hbv,
             clip_denoised=True
         )
 
@@ -219,6 +223,7 @@ class Diffusion_MultiTask(Diffusion):
         self,
         shape,
         cond_adc, cond_t2w,
+        cond_hbv=None,
         *,
         control   = None,
         return_all_timesteps = False,
@@ -247,7 +252,8 @@ class Diffusion_MultiTask(Diffusion):
                 x_self_cond_adc=self_cond_adc,
                 x_self_cond_t2w=self_cond_t2w,
                 control=control,
-                generator=generator
+                generator=generator,
+                cond_hbv=cond_hbv,
             )
             if return_all_timesteps:
                 xs_adc.append(x_adc)
@@ -267,6 +273,7 @@ class Diffusion_MultiTask(Diffusion):
         shape,
         cond_adc, cond_t2w,
         *,
+        cond_hbv=None,
         control   = None,
         return_all_timesteps = False,
         generator  =None
@@ -304,6 +311,7 @@ class Diffusion_MultiTask(Diffusion):
                 x_self_cond_adc=self_cond_adc,
                 x_self_cond_t2w=self_cond_t2w,
                 control=control,
+                cond_hbv=cond_hbv,
                 clip_x_start=True,
                 rederive_pred_noise=True
             )
@@ -349,6 +357,7 @@ class Diffusion_MultiTask(Diffusion):
         self,
         adc, t2w,
         *,
+        cond_hbv    = None,
         batch_size  = 16,
         return_all_timesteps = False,
         control     = None,
@@ -388,7 +397,8 @@ class Diffusion_MultiTask(Diffusion):
                     t2w,
                     control=control,
                     return_all_timesteps=return_all_timesteps,
-                    generator=g
+                    generator=g,
+                    cond_hbv=cond_hbv,
                 )
                 adc_list.append(adc)
                 t2w_list.append(t2w)
@@ -405,7 +415,8 @@ class Diffusion_MultiTask(Diffusion):
                 t2w,
                 control=control,
                 return_all_timesteps=return_all_timesteps,
-                generator=generator
+                generator=generator,
+                cond_hbv=cond_hbv
             )
 
     def p_losses(
@@ -414,6 +425,7 @@ class Diffusion_MultiTask(Diffusion):
         x0_t2w, cond_t2w,
         t,
         *,
+        cond_hbv=None,
         defined_target_adc = None, defined_target_t2w = None,
         eval_transform_adc = None, eval_transform_t2w = None,
         control = None,
@@ -444,7 +456,8 @@ class Diffusion_MultiTask(Diffusion):
                 # predict x_start for each branch (normalized space), detach
                 out_adc_tmp, out_t2w_tmp = self.model(
                     x_adc_t, cond_adc, x_t2w_t, cond_t2w, t,
-                    x_self_cond_adc=None, x_self_cond_t2w=None, control=control
+                    x_self_cond_adc=None, x_self_cond_t2w=None, control=control,
+                    hbv=cond_hbv,
                 )
                 x_self_cond_adc = self._xstart_from_model_output(x_adc_t, t, out_adc_tmp).detach()
                 x_self_cond_t2w = self._xstart_from_model_output(x_t2w_t, t, out_t2w_tmp).detach()
@@ -453,7 +466,8 @@ class Diffusion_MultiTask(Diffusion):
         pred_adc, pred_t2w = self.model(
             x_adc_t, cond_adc, x_t2w_t, cond_t2w, t,
             x_self_cond_adc=x_self_cond_adc, x_self_cond_t2w=x_self_cond_t2w,
-            control=control
+            control=control,
+            hbv=cond_hbv,
         )
 
         # x_start preds (normalized)
@@ -522,6 +536,7 @@ class Diffusion_MultiTask(Diffusion):
         x0_adc, cond_adc,
         x0_t2w, cond_t2w,
         *,
+        cond_hbv=None,
         defined_target_adc=None, defined_target_t2w=None,
         eval_transform_adc=None, eval_transform_t2w=None,
         control=None,
@@ -541,6 +556,7 @@ class Diffusion_MultiTask(Diffusion):
             x0_adc, cond_adc, 
             x0_t2w, cond_t2w, 
             t,
+            cond_hbv=cond_hbv,
             defined_target_adc=defined_target_adc, defined_target_t2w=defined_target_t2w,
             eval_transform_adc=eval_transform_adc, eval_transform_t2w=eval_transform_t2w,
             control=control,

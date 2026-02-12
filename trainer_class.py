@@ -22,7 +22,6 @@ class Trainer(object):
         test_dataloader,
         accelerator,
         *,
-        use_T2W                     = False,
         use_T2W_embed               = False,
         finetune_controlnet         = False,
         batch_size                  = 16,
@@ -56,8 +55,9 @@ class Trainer(object):
         self.is_ddim_sampling    = diffusion_model.is_ddim_sampling
 
         self.img_size       = img_size        
-        self.use_T2W        = use_T2W
+        self.use_T2W        = self.model.use_T2W 
         self.use_T2W_embed  = use_T2W_embed
+        self.use_HBV        = self.model.use_HBV 
         self.finetune_controlnet = finetune_controlnet
         
         if self.finetune_controlnet:
@@ -197,6 +197,7 @@ class Trainer(object):
             with self.accelerator.autocast():
                 control = data['T2W_condition'] if self.model.controlnet else None
                 t2w_in  = data['T2W_condition'] if (self.use_T2W and self.model.controlnet is None) else None
+                hbv_in  = data['HBV_condition'] if self.use_HBV else None
                 if 'ADC_target' in data.keys():
                     defined_target = data['ADC_target'] 
                     eval_transform = downsample_transform(self.img_size) 
@@ -204,11 +205,12 @@ class Trainer(object):
                     defined_target, eval_transform = None, None
                 
                 losses = {}
+
                 if self.use_T2W_embed:
                     data['T2W_embed'] = [t.squeeze(1) for t in data['T2W_embed']]
-                    prediction, loss, losses['mse'], losses['perct'], losses['ssim'], t = self.model(data['ADC_input'], data['ADC_condition'], data['T2W_embed'], control, defined_target, eval_transform)
+                    prediction, loss, losses['mse'], losses['perct'], losses['ssim'], t = self.model(data['ADC_input'], data['ADC_condition'], data['T2W_embed'], control, defined_target, eval_transform, condition_hbv=hbv_in)
                 else:
-                    prediction, loss, losses['mse'], losses['perct'], losses['ssim'], t = self.model(data['ADC_input'], data['ADC_condition'], t2w_in,            control,  defined_target, eval_transform)
+                    prediction, loss, losses['mse'], losses['perct'], losses['ssim'], t = self.model(data['ADC_input'], data['ADC_condition'], t2w_in,            control,  defined_target, eval_transform, condition_hbv=hbv_in)
                 
                 if self.vae is not None and self.image_loss_weights is not None:
                     reconstruction = decode_latent(prediction, self.vae)[:, 0, :, :].unsqueeze(1) 
@@ -246,6 +248,7 @@ class Trainer(object):
             batches         = num_to_groups(self.num_samples, self.batch_size)
             sample_lowres   = data['ADC_condition'][:self.num_samples].to(self.accelerator.device)
             sample_t2w      = data['T2W_condition'][:self.num_samples].to(self.accelerator.device) if (self.model.controlnet is not None) or self.model.use_T2W else None
+            sample_hbv      = data['HBV_condition'][:self.num_samples].to(self.accelerator.device) if self.model.use_HBV else None
             
             if 'T2W_embed' in data:
                 sample_t2w_embed = []
@@ -261,17 +264,18 @@ class Trainer(object):
                 end = min(start + n, total)
                 low_res = sample_lowres[start:end]
                 t2w     = sample_t2w[start:end] if sample_t2w is not None else None
+                hbv     = sample_hbv[start:end] if sample_hbv is not None else None 
 
                 if low_res.shape[0] == 0:
                     break  # no more valid conditioning inputs
                 
                 if 'T2W_embed' in data:
                     t2w_embed = sample_t2w_embed[start:end]
-                    images    = self.ema.ema_model.sample(batch_size=low_res.shape[0], low_res=low_res, t2w=t2w_embed)
+                    images    = self.ema.ema_model.sample(batch_size=low_res.shape[0], low_res=low_res, t2w=t2w_embed, hbv=hbv)
                 else:
                     control = t2w if self.model.controlnet else None
                     t2w_in  = t2w if (self.model.use_T2W and self.model.controlnet is None) else None
-                    images  = self.ema.ema_model.sample(batch_size=low_res.shape[0], low_res=low_res, control=control, t2w=t2w_in)
+                    images  = self.ema.ema_model.sample(batch_size=low_res.shape[0], low_res=low_res, control=control, t2w=t2w_in, hbv=hbv)
                     
                 all_images_list.append(images)
                 start = end
@@ -601,12 +605,15 @@ class Trainer_MultiTask(Trainer):
             data = self._apply_modality_dropout(data)
 
             with self.accelerator.autocast():
+                hbv_in = data.get("HBV_condition", None)
                 out = self.model(
                     data["ADC_input"],
                     data["ADC_condition"],
                     data["T2W_input"],
                     data["T2W_condition"],
+                    cond_hbv=hbv_in,
                 )
+                
                 
                 pred_adc, pred_t2w, loss, logs, t = self._parse_multitask_forward_output(out)
 
@@ -669,9 +676,11 @@ class Trainer_MultiTask(Trainer):
                     break
 
                 # EMA model returns (adc, t2w) for multitask sample()
+                hbv_in = data["HBV_condition"][start:end] if self.model.use_HBV else None
                 adc_s, t2w_s = self.ema.ema_model.sample(
-                    adc = cond_adc,
-                    t2w = cond_t2w,
+                    cond_adc = cond_adc,
+                    cond_t2w = cond_t2w,
+                    cond_hbv = hbv_in,
                     batch_size=cond_adc.shape[0],
                     return_all_timesteps=False
                 )

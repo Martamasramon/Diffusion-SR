@@ -121,7 +121,8 @@ class UNet_MultiTask(nn.Module):
         self.mask_channels      = 1
         self.self_condition     = getattr(unet_adc, "self_condition", False) or getattr(unet_t2w, "self_condition", False)
         self.controlnet         = None
-        self.use_T2W         = False
+        self.use_T2W            = False
+        self.use_HBV            = getattr(unet_adc, "use_HBV", False) or getattr(unet_t2w, "use_HBV", False)
 
         # Cross-attn modules: one per block index (encoder + decoder), plus optional middle.
         self.cross_encoder = cross_encoder and cross_attention
@@ -164,7 +165,7 @@ class UNet_MultiTask(nn.Module):
 
     def forward(
         self, x_adc, cond_adc, x_t2w, cond_t2w, timesteps, *, 
-        x_self_cond_adc=None, x_self_cond_t2w=None, control=None
+        x_self_cond_adc=None, x_self_cond_t2w=None, cond_hbv=None, control=None
     ):
         """
         x_adc, x_t2w: noisy inputs for each task [B, 1, H, W]
@@ -184,8 +185,17 @@ class UNet_MultiTask(nn.Module):
             x_self_cond_t2w = default(x_self_cond_t2w, lambda: torch.zeros_like(x_t2w))
             x_t2w = torch.cat([x_t2w, x_self_cond_t2w], dim=1)
               
+        # Concatenate modality inputs; include HBV when the underlying unet expects it
         h_adc = torch.cat([x_adc, cond_adc], dim=1).type(self.adc.dtype)
         h_t2w = torch.cat([x_t2w, cond_t2w], dim=1).type(self.t2w.dtype)
+
+        if getattr(self.adc, "use_HBV", False):
+            assert cond_hbv is not None, "use_HBV=True but no HBV provided"
+            h_adc = torch.cat([h_adc, cond_hbv.type(self.adc.dtype)], dim=1)
+
+        if getattr(self.t2w, "use_HBV", False):
+            assert cond_hbv is not None, "use_HBV=True but no HBV provided"
+            h_t2w = torch.cat([h_t2w, cond_hbv.type(self.t2w.dtype)], dim=1)
 
         hs_adc = []
         hs_t2w = []
