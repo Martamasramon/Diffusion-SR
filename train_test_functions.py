@@ -37,7 +37,7 @@ def get_img_size(args):
 def build_UNet(args, img_channels=1):
     img_size = get_img_size(args)
     
-    if args.unet_type == 'latent':
+    if args.unet_type == 'latent' or args.unet_type=='disc_diff':
         args.self_condition = False
         
     if args.unet_type == 'basic':
@@ -45,6 +45,7 @@ def build_UNet(args, img_channels=1):
         return UNet_Basic_DiscDiff(
             image_size      = img_size,
             use_T2W         = args.use_T2W,
+            use_HBV         = args.use_HBV,
             self_condition  = args.self_condition,
         )
     elif args.unet_type == 'basic_old' or args.unet_type == 'latent':
@@ -68,10 +69,11 @@ def build_UNet(args, img_channels=1):
     )
     elif args.unet_type == 'disc_diff':
         print('Building Disc-Diff UNet model...')
-        assert args.use_T2W is True
+        assert (args.use_T2W is True or args.use_HBV is True)
         return UNet_DisC_Diff(
             image_size      = img_size,
             use_T2W         = args.use_T2W,
+            use_HBV         = args.use_HBV,
             self_condition  = args.self_condition,
         )
     elif args.unet_type == 'multitask':
