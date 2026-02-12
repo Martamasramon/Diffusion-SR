@@ -313,8 +313,8 @@ class UNet_DisC_Diff(UNet_Basic):
     :param resblock_updown: use residual blocks for up/downsampling.
     """
 
-    def __init__(self, *args, in_channels=1, **kwargs):
-        super().__init__(*args, in_channels=in_channels, **kwargs)    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)    
         
         self.input_blocks_lr  = nn.ModuleList([copy.deepcopy(module) for module in self.input_blocks])
         
