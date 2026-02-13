@@ -166,7 +166,7 @@ def load_model(args, model, diffusion, device):
     diffusion.to(device)
     
 def load_data(args, data_type='train'):
-    print('Loading data...')
+    print(f'Loading data ({data_type})...')
     dataset     = MyDataset(
         folder, 
         data_type       = data_type, 

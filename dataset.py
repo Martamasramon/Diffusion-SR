@@ -50,9 +50,9 @@ class MyDataset(Dataset):
         self.img_dict   = pd.read_csv(f'/cluster/project7/ProsRegNet_CellCount/Dataset_preparation/CSV/{csv_name}.csv')
         self.transforms = get_transforms(2, image_size, downsample, type=self.processing)
             
-        print('\n', data_type)
-        for i in self.transforms:
-            print(i, self.transforms[i])
+        # print('\n', data_type)
+        # for i in self.transforms:
+        #     print(i, self.transforms[i])
             
         if self.t2w_embed:
             # Load pre-trained T2W embedding model
