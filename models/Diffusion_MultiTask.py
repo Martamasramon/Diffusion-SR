@@ -353,24 +353,13 @@ class Diffusion_MultiTask(Diffusion):
         return x_adc, x_t2w
 
     @torch.no_grad()
-    def sample(
-        self,
-        adc, t2w,
-        *,
-        cond_hbv    = None,
-        batch_size  = 16,
-        return_all_timesteps = False,
-        control     = None,
-        perform_uq  = False,
-        num_rep     = None,
-        generator   = None,
-    ):
+    def sample(self,adc,control=None,batch_size=16,return_all_timesteps=False,t2w=None,hbv=None,perform_uq=False,num_rep=None):
         """
         Returns:
           - if perform_uq: (adc_samples, t2w_samples) each shaped [B, R, C, H, W] (or [B, R, T, C, H, W] if return_all_timesteps)
           - else: (adc, t2w) each shaped [B, C, H, W] (or [B, T, C, H, W] if return_all_timesteps)
 
-        You must pass adc and t2w already on the correct device.
+        adc and t2w should be the conditioning inputs already on the correct device.
         """
         image_size = self.image_size
         channels = 1  # if yours differ, set from your training setup
@@ -391,17 +380,17 @@ class Diffusion_MultiTask(Diffusion):
             for s in seeds:
                 g = torch.Generator(device=self.device)
                 g.manual_seed(int(s.item()))
-                adc, t2w = sample_fn(
+                adc_out, t2w_out = sample_fn(
                     shape,
                     adc,
                     t2w,
                     control=control,
                     return_all_timesteps=return_all_timesteps,
                     generator=g,
-                    cond_hbv=cond_hbv,
+                    cond_hbv=hbv,
                 )
-                adc_list.append(adc)
-                t2w_list.append(t2w)
+                adc_list.append(adc_out)
+                t2w_list.append(t2w_out)
 
             # stack along rep dimension
             adc = torch.stack(adc_list, dim=1)
@@ -415,8 +404,8 @@ class Diffusion_MultiTask(Diffusion):
                 t2w,
                 control=control,
                 return_all_timesteps=return_all_timesteps,
-                generator=generator,
-                cond_hbv=cond_hbv
+                generator=None,
+                cond_hbv=hbv
             )
 
     def p_losses(
