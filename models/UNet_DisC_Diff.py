@@ -335,6 +335,7 @@ class UNet_DisC_Diff(UNet_Basic):
         self.SE_Attention_dist_1 = SE_Attention(channel=enc_ch//2, reduction=8)
         self.SE_Attention_dist_2 = SE_Attention(channel=enc_ch//2, reduction=8)
         self.SE_Attention_dist_3 = SE_Attention(channel=enc_ch//2, reduction=8)
+        self.SE_Attention_dist_4 = SE_Attention(channel=enc_ch//2, reduction=8)
 
         self.dim_reduction_non_zeros = nn.Sequential(
             conv_nd(self.dims , 2 * enc_ch, enc_ch, 1, padding=0),
