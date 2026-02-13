@@ -24,8 +24,8 @@ CMD_LIST=(
 
       ### T2W/HBV ###
       # "cd diffusion_basic && python3 train.py --results_folder './lowfield_concat_t2w'     --use_T2W "
-      "cd diffusion_basic && python3 train.py --results_folder './lowfield_concat_t2w_hbv' --use_T2W --use_HBV"
-      "cd diffusion_basic && python3 train.py --results_folder './lowfield_concat_hbv'     --use_HBV "
+      # "cd diffusion_basic && python3 train.py --results_folder './lowfield_concat_t2w_hbv' --use_T2W --use_HBV"
+      # "cd diffusion_basic && python3 train.py --results_folder './lowfield_concat_hbv'     --use_HBV "
       
       ### T2W Offset ###
       # "cd diffusion_basic && python3 train.py --results_folder './concat_down8_offset20' --use_T2W --down 8 --t2w_offset 20"
@@ -60,14 +60,14 @@ CMD_LIST=(
     ## DisC-Diff ##
     # "cd diffusion_basic && python3 train.py --results_folder './lowfield_discdiff_basic' "
     # "cd diffusion_basic && python3 train.py --results_folder './lowfield_discdiff_multi' --unet_type 'disc_diff' --use_T2W "
-    "cd diffusion_basic && python3 train.py --results_folder './lowfield_discdiff_hbv'     --unet_type 'disc_diff' --use_HBV "
+    # "cd diffusion_basic && python3 train.py --results_folder './lowfield_discdiff_hbv'     --unet_type 'disc_diff' --use_HBV "
     "cd diffusion_basic && python3 train.py --results_folder './lowfield_discdiff_t2w_hbv' --unet_type 'disc_diff' --use_T2W --use_HBV "
 
 
     ### Multi-task ###
-    "cd diffusion_multitask && python3 train.py --results_folder './hbv'                  --use_T2W --unet_type 'multitask' --batch_size 4 --use_HBV"
+    # "cd diffusion_multitask && python3 train.py --results_folder './hbv'                  --use_T2W --unet_type 'multitask' --batch_size 4 --use_HBV"
     "cd diffusion_multitask && python3 train.py --results_folder './dropout'              --use_T2W --unet_type 'multitask' --batch_size 4 --modality_drop_prob 0.1"
-    "cd diffusion_multitask && python3 train.py --results_folder './no_attn'              --use_T2W --unet_type 'multitask' --batch_size 4 --no_cross_attn"
+    # "cd diffusion_multitask && python3 train.py --results_folder './no_attn'              --use_T2W --unet_type 'multitask' --batch_size 4 --no_cross_attn"
     "cd diffusion_multitask && python3 train.py --results_folder './uncorrelated_noise'   --use_T2W --unet_type 'multitask' --batch_size 4 --noise_rho 0 "
     "cd diffusion_multitask && python3 train.py --results_folder './uncorrelated_no_attn' --use_T2W --unet_type 'multitask' --batch_size 4 --no_cross_attn --noise_rho 0"
   )

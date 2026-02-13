@@ -1,4 +1,4 @@
-#$ -l tmem=64G,h_vmem=64G
+#$ -l tmem=150G,h_vmem=150G
 #$ -l gpu=true
 #$ -l h_rt=5:00:00
 
@@ -8,11 +8,9 @@
 
 #$ -wd /cluster/project7/ProsRegNet_CellCount/CriDiff/
 #$ -N Test_diffusion
-#$ -t 1-3
+#$ -t 1-2
 
 date
-hostname
-nvidia-smi
 
 export PATH=/share/apps/python-3.9.5-shared/bin:$PATH
 export LD_LIBRARY_PATH=/share/apps/python-3.9.5-shared/lib:$LD_LIBRARY_PATH
@@ -23,10 +21,10 @@ export PATH="/cluster/project7/ProsRegNet_CellCount/CriDiff/CriDiff_env/bin:$PAT
 CMD_LIST=(
   ### Basic ###
   # "cd diffusion_basic && python3 test.py --checkpoint './lowfield/model-best.pt'  --unet_type 'basic_old'"
-  # "cd diffusion_basic && python3 test.py --checkpoint './lowfield_concat/model-best.pt'  --use_T2W --unet_type 'basic_old'"
 
-  "cd diffusion_basic && python3 test.py --checkpoint './lowfield_discdiff_basic/model-best.pt' "
-  "cd diffusion_basic && python3 test.py --checkpoint './lowfield_discdiff_t2w/model-best.pt' "
+  # "cd diffusion_basic && python3 test.py --checkpoint './lowfield_concat_t2w/model-20.pt'  --use_T2W "
+  # "cd diffusion_basic && python3 test.py --checkpoint './lowfield_discdiff_basic/model-best.pt' "
+  # "cd diffusion_basic && python3 test.py --checkpoint './lowfield_discdiff_t2w/model-best.pt' "
 
   ### Attention ###
   # "cd diffusion_attention && python3 test.py --checkpoint './lowfield/model-best.pt'  --use_T2W"
@@ -47,7 +45,8 @@ CMD_LIST=(
   # "cd diffusion_basic && python3 test.py --checkpoint './lowfield_discdiff_multi_hbv/model-best.pt'  --use_T2W --use_HBV --unet_type 'disc_diff'"
 
   ### Multi-task ###
-  "cd diffusion_multitask && python3 test.py --checkpoint './test_full/model-best.pt'  --use_T2W --unet_type 'multitask'"  
+  "cd diffusion_multitask && python3 test.py --checkpoint './basic/model-best.pt'  --use_T2W --unet_type 'multitask'"  
+  "cd diffusion_multitask && python3 test.py --checkpoint './basic/model-best.pt'  --use_T2W --unet_type 'multitask'"  
 )
 
 IDX=$((SGE_TASK_ID - 1))

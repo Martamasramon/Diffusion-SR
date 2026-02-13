@@ -20,6 +20,6 @@ export PATH="/cluster/project7/ProsRegNet_CellCount/CriDiff/CriDiff_env/bin:$PAT
 
 cd diffusion_basic 
 
-python3 train.py --results_folder './lowfield_concat_t2w' --use_T2W 
+python3 train.py --results_folder './lowfield_discdiff_hbv'     --unet_type 'disc_diff' --use_HBV
 
 date
