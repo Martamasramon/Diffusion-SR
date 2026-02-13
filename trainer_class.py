@@ -324,7 +324,7 @@ class Trainer(object):
                 _, total_loss_train, total_losses_train = self.calc_loss(train=True)
                 
                 # Validate every few steps to reduce overhead 
-                do_val = (self.step % self.val_every == 0)
+                do_val = ((self.step + 1) % self.val_every == 0)
                 if do_val:
                     with torch.no_grad():
                         data, total_loss_val, total_losses_val = self.calc_loss(train=False)
