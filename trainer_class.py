@@ -42,7 +42,7 @@ class Trainer(object):
         split_batches               = True,
         inception_block_idx         = 2048,
         max_grad_norm               = 1.,
-        save_best_and_latest_only   = False,
+        save_best_and_latest_only   = True,
         wandb_run                   = None, 
         vae                         = None,
         image_loss_weights          = {'mse':1, 'ssim':0, 'perct': 0.01},
@@ -59,6 +59,8 @@ class Trainer(object):
         self.use_T2W_embed  = use_T2W_embed
         self.use_HBV        = self.model.use_HBV 
         self.finetune_controlnet = finetune_controlnet
+        
+        assert save_every%val_every==0 and sample_every%val_every==0, "save_every and sample_every should be multiples of val_every for consistent milestone logging and validation frequency."
         
         if self.finetune_controlnet:
             assert getattr(self.model, "controlnet", None) is not None, "finetune_controlnet_only=True but model.controlnet is None."
@@ -349,7 +351,7 @@ class Trainer(object):
                     # Save model 
                     if self.step != 0 and divisible_by(self.step, self.save_every):
                         milestone = self.step // self.save_every
-                        if self.save_best_and_latest_only and do_val:
+                        if self.save_best_and_latest_only:
                             if 'mse' in total_losses_val:
                                 val_mse = total_losses_val['mse']
                             else:
@@ -678,8 +680,8 @@ class Trainer_MultiTask(Trainer):
                 # EMA model returns (adc, t2w) for multitask sample()
                 hbv_in = data["HBV_condition"][start:end] if self.model.use_HBV else None
                 adc_s, t2w_s = self.ema.ema_model.sample(
-                    cond_adc = cond_adc,
-                    cond_t2w = cond_t2w,
+                    adc      = cond_adc,
+                    t2w      = cond_t2w,
                     cond_hbv = hbv_in,
                     batch_size=cond_adc.shape[0],
                     return_all_timesteps=False

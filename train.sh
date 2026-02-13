@@ -8,7 +8,7 @@
 
 #$ -wd /cluster/project7/ProsRegNet_CellCount/CriDiff/
 #$ -N Train_diffusion
-#$ -t 1-10
+#$ -t 1-9
 
 date
 nvidia-smi
@@ -24,7 +24,7 @@ CMD_LIST=(
     # "cd diffusion_basic && python3 train.py --results_folder './lowfield_perct' "
 
       ### T2W/HBV ###
-      "cd diffusion_basic && python3 train.py --results_folder './lowfield_concat_t2w'     --use_T2W "
+      # "cd diffusion_basic && python3 train.py --results_folder './lowfield_concat_t2w'     --use_T2W "
       "cd diffusion_basic && python3 train.py --results_folder './lowfield_concat_t2w_hbv' --use_T2W --use_HBV"
       "cd diffusion_basic && python3 train.py --results_folder './lowfield_concat_hbv'     --use_HBV "
       
@@ -67,9 +67,9 @@ CMD_LIST=(
 
     ### Multi-task ###
     "cd diffusion_multitask && python3 train.py --results_folder './hbv'                  --use_T2W --unet_type 'multitask' --batch_size 4 --use_HBV"
-    # "cd diffusion_multitask && python3 train.py --results_folder './dropout'              --use_T2W --unet_type 'multitask' --batch_size 4 --modality_drop_prob 0.1"
-    # "cd diffusion_multitask && python3 train.py --results_folder './no_attn'              --use_T2W --unet_type 'multitask' --batch_size 4 --no_cross_attn"
-    # "cd diffusion_multitask && python3 train.py --results_folder './uncorrelated_noise'   --use_T2W --unet_type 'multitask' --batch_size 4 --noise_rho 0 "
+    "cd diffusion_multitask && python3 train.py --results_folder './dropout'              --use_T2W --unet_type 'multitask' --batch_size 4 --modality_drop_prob 0.1"
+    "cd diffusion_multitask && python3 train.py --results_folder './no_attn'              --use_T2W --unet_type 'multitask' --batch_size 4 --no_cross_attn"
+    "cd diffusion_multitask && python3 train.py --results_folder './uncorrelated_noise'   --use_T2W --unet_type 'multitask' --batch_size 4 --noise_rho 0 "
     "cd diffusion_multitask && python3 train.py --results_folder './uncorrelated_no_attn' --use_T2W --unet_type 'multitask' --batch_size 4 --no_cross_attn --noise_rho 0"
   )
 
