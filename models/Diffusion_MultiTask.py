@@ -111,7 +111,7 @@ class Diffusion_MultiTask(Diffusion):
             x_self_cond_adc=x_self_cond_adc,
             x_self_cond_t2w=x_self_cond_t2w,
             control=control,
-            hbv=cond_hbv,
+            cond_hbv=cond_hbv,
         )
 
         maybe_clip = partial(torch.clamp, min=-1., max=1.) if clip_x_start else (lambda z: z)
@@ -457,7 +457,7 @@ class Diffusion_MultiTask(Diffusion):
                 out_adc_tmp, out_t2w_tmp = self.model(
                     x_adc_t, cond_adc, x_t2w_t, cond_t2w, t,
                     x_self_cond_adc=None, x_self_cond_t2w=None, control=control,
-                    hbv=cond_hbv,
+                    cond_hbv=cond_hbv,
                 )
                 x_self_cond_adc = self._xstart_from_model_output(x_adc_t, t, out_adc_tmp).detach()
                 x_self_cond_t2w = self._xstart_from_model_output(x_t2w_t, t, out_t2w_tmp).detach()
@@ -467,7 +467,7 @@ class Diffusion_MultiTask(Diffusion):
             x_adc_t, cond_adc, x_t2w_t, cond_t2w, t,
             x_self_cond_adc=x_self_cond_adc, x_self_cond_t2w=x_self_cond_t2w,
             control=control,
-            hbv=cond_hbv,
+            cond_hbv=cond_hbv,
         )
 
         # x_start preds (normalized)
