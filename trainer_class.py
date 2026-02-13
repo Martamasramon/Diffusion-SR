@@ -607,7 +607,7 @@ class Trainer_MultiTask(Trainer):
             data = self._apply_modality_dropout(data)
 
             with self.accelerator.autocast():
-                hbv_in = data.get("HBV_condition", None)
+                hbv_in = data.get("HBV", None)
                 out = self.model(
                     data["ADC_input"],
                     data["ADC_condition"],
@@ -678,7 +678,7 @@ class Trainer_MultiTask(Trainer):
                     break
 
                 # EMA model returns (adc, t2w) for multitask sample()
-                hbv_in = data["HBV_condition"][start:end] if self.model.use_HBV else None
+                hbv_in = data["HBV"][start:end] if self.model.use_HBV else None
                 adc_s, t2w_s = self.ema.ema_model.sample(
                     adc      = cond_adc,
                     t2w      = cond_t2w,
