@@ -56,16 +56,15 @@ class UNet_Basic(nn.Module):
             num_head_channels       = 48,
             use_scale_shift_norm    = False,
             resblock_updown         = False
+            in_channels             = None
     ):
         super().__init__()
 
         self.image_size         = image_size
-        base_channels = 2       # x + low_res
-        if use_T2W:
-            base_channels += 1
-        if use_HBV:
-            base_channels += 1  
-        self.in_channels        = base_channels + (1 if self_condition else 0)
+        self.self_condition     = self_condition
+        self.use_T2W            = use_T2W
+        self.use_HBV            = use_HBV        
+        self.in_channels        = in_channels if in_channels is not None else self._get_in_channels()
         self.model_channels     = model_channels
         self.out_channels       = 1 
         self.num_res_blocks     = num_res_blocks
@@ -79,9 +78,6 @@ class UNet_Basic(nn.Module):
         self.num_head_channels  = num_head_channels
         self.num_heads_upsample = num_heads
         self.dims               = dims
-        self.self_condition     = self_condition
-        self.use_T2W            = use_T2W
-        self.use_HBV            = use_HBV
         
         # Make compatible with diffusion script
         self.input_img_channels = 1
@@ -236,6 +232,16 @@ class UNet_Basic(nn.Module):
             zero_module(conv_nd(self.dims , ch, self.out_channels, 3, padding=1)),
         )
 
+    def _get_in_channels(self):
+        base_channels = 2       # x + low_res
+        if self.use_T2W:
+            base_channels += 1
+        if self.use_HBV:
+            base_channels += 1  
+            
+        return base_channels + (1 if self.self_condition else 0)
+        
+        
     def convert_to_fp16(self):
         """
         Convert the torso of the model to float16.
@@ -313,8 +319,8 @@ class UNet_DisC_Diff(UNet_Basic):
     :param resblock_updown: use residual blocks for up/downsampling.
     """
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)    
+    def __init__(self, *args, in_channels=1, **kwargs):
+        super().__init__(*args, in_channels=in_channels, **kwargs)    
         
         self.input_blocks_lr  = nn.ModuleList([copy.deepcopy(module) for module in self.input_blocks])
         
