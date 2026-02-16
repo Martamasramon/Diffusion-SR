@@ -88,10 +88,15 @@ def run_diffusion(diffusion, model_input, unet_type, controlnet=False, perform_u
     
     # Sampling is inference-only
     with torch.no_grad():
-        pred = diffusion.sample(model_input['lowres'], **kwargs)
-        
-    if unet_type == 'multitask':
-        pred = pred[0] # pred[1] is t2w -> deal with this later
+        if unet_type == 'multitask':
+            # Multitask model requires both adc and t2w conditioning as positional args
+            pred = diffusion.sample(model_input['lowres'], t2w=model_input['t2w'], **kwargs)
+            pred = pred[0]  # Extract ADC output; pred[1] is T2W
+        else:
+            if model_input['t2w'] is not None:
+                kwargs["control" if controlnet else "t2w"] = model_input['t2w']
+            
+            pred = diffusion.sample(model_input['lowres'], **kwargs)
 
     return pred
 
