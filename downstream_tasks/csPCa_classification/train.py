@@ -27,7 +27,7 @@ def train(output_dir, timestamp, debug=False):
     batch_size = 64
     random_seed = 24
 
-    metadata_csv_path = './data/marksheet.csv'
+    metadata_csv_path = '/cluster/project7/backup_masramon/picai_marksheet.csv'
     target_size = (224, 224)
 
     set_random_seed(random_seed)
@@ -46,21 +46,18 @@ def train(output_dir, timestamp, debug=False):
     print("Creating Datasets and DataLoaders...")
     train_dataset = PicaiDataset(
         metadata_X_df=train_metadata_X_df,
-        img_dir='./data/',
         labels=train_metadata_y.tolist(),
         target_size=target_size
     )
 
     val_dataset = PicaiDataset(
         metadata_X_df=val_metadata_X_df,
-        img_dir='./data/',
         labels=val_metadata_y.tolist(),
         target_size=target_size
     )
 
     test_dataset = PicaiDataset(
         metadata_X_df=test_metadata_X_df,
-        img_dir='./data/',
         labels=test_metadata_y.tolist(),
         target_size=target_size
     )

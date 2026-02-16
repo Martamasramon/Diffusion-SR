@@ -9,9 +9,10 @@ from utils.misc_utils import resample_to_reference
 
 class PicaiDataset(Dataset):
 
-    def __init__(self, metadata_X_df, img_dir, labels=None, target_size=(224, 224)):
+    def __init__(self, metadata_X_df, labels=None, target_size=(224, 224)):
         self.metadata_X_df = metadata_X_df
-        self.img_dir = img_dir
+        self.img_dir   =  '/cluster/project7/backup_masramon/PI-CAI/'
+        self.label_dir =  '/cluster/project7/backup_masramon/PI-CAI_annotations/lesion_human_original/'
         self.labels = labels
         self.target_size = target_size
 
@@ -25,10 +26,10 @@ class PicaiDataset(Dataset):
         image_name = img_data['image_name']
         patient_id = img_data['patient_id']
 
-        t2w_img_path = f"{self.img_dir}/picai_public_images/{patient_id}/{image_name}_t2w.mha"
-        hbv_img_path = f"{self.img_dir}/picai_public_images/{patient_id}/{image_name}_hbv.mha"
-        adc_img_path = f"{self.img_dir}/picai_public_images/{patient_id}/{image_name}_adc.mha"
-        lesion_mask_path = f"{self.img_dir}/lesion_masks/{image_name}.nii.gz"
+        t2w_img_path = f"{self.img_dir}/{patient_id}/{image_name}_t2w.mha"
+        hbv_img_path = f"{self.img_dir}/{patient_id}/{image_name}_hbv.mha"
+        adc_img_path = f"{self.img_dir}/{patient_id}/{image_name}_adc.mha"
+        lesion_mask_path = f"{self.label_dir}/{image_name}.nii.gz"
 
         # Load images and lesion mask using SimpleITK
         t2w_img = sitk.ReadImage(t2w_img_path)
