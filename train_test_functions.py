@@ -151,15 +151,15 @@ def remap_checkpoints(state, target_model):
 def load_model(args, model, diffusion, device):
     print('\nLoading checkpoint...')
     checkpoint = torch.load(args.checkpoint, map_location=device)
-    
+
     if args.controlnet:
         load_pretrained_with_controlnet(diffusion, checkpoint)
     else:
-        missing, unexpected = diffusion.load_state_dict(remap_checkpoints(checkpoint['model'], model), strict=False)
-    # print("Missing keys (first 20):",    missing[:20])
-    # print("Unexpected keys (first 20):", unexpected[:20])
-    
-    # Move model to device
+        # checkpoint['model'] contains the UNet/model state_dict saved during training.
+        model_state = remap_checkpoints(checkpoint['model'], model)
+        missing, unexpected = model.load_state_dict(model_state, strict=False)
+
+    # Move model to device and attach to diffusion
     model.eval()
     model.to(device)
     diffusion.model = model
