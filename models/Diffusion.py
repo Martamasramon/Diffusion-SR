@@ -379,7 +379,7 @@ class Diffusion(nn.Module):
             input_img, 
             condition_adc, 
             condition_t2w  = None, 
-            condition_hbv  = None,
+            hbv            = None,
             control        = None, 
             defined_target = None,             
             eval_transform = None,
@@ -390,4 +390,4 @@ class Diffusion(nn.Module):
         assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
         t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
         
-        return self.p_losses(self.normalize(input_img), condition_adc, t, control, condition_t2w, condition_hbv, defined_target, eval_transform, *args, **kwargs)
+        return self.p_losses(self.normalize(input_img), condition_adc, t, control, condition_t2w, hbv, defined_target, eval_transform, *args, **kwargs)

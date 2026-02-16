@@ -165,7 +165,7 @@ class UNet_MultiTask(nn.Module):
 
     def forward(
         self, x_adc, cond_adc, x_t2w, cond_t2w, timesteps, *, 
-        x_self_cond_adc=None, x_self_cond_t2w=None, cond_hbv=None, control=None
+        x_self_cond_adc=None, x_self_cond_t2w=None, hbv=None, control=None
     ):
         """
         x_adc, x_t2w: noisy inputs for each task [B, 1, H, W]
@@ -190,12 +190,12 @@ class UNet_MultiTask(nn.Module):
         h_t2w = torch.cat([x_t2w, cond_t2w], dim=1).type(self.t2w.dtype)
 
         if getattr(self.adc, "use_HBV", False):
-            assert cond_hbv is not None, "use_HBV=True but no HBV provided"
-            h_adc = torch.cat([h_adc, cond_hbv.type(self.adc.dtype)], dim=1)
+            assert hbv is not None, "use_HBV=True but no HBV provided"
+            h_adc = torch.cat([h_adc, hbv.type(self.adc.dtype)], dim=1)
 
         if getattr(self.t2w, "use_HBV", False):
-            assert cond_hbv is not None, "use_HBV=True but no HBV provided"
-            h_t2w = torch.cat([h_t2w, cond_hbv.type(self.t2w.dtype)], dim=1)
+            assert hbv is not None, "use_HBV=True but no HBV provided"
+            h_t2w = torch.cat([h_t2w, hbv.type(self.t2w.dtype)], dim=1)
 
         hs_adc = []
         hs_t2w = []

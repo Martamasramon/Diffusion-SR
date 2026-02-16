@@ -613,7 +613,7 @@ class Trainer_MultiTask(Trainer):
                     data["ADC_condition"],
                     data["T2W_input"],
                     data["T2W_condition"],
-                    cond_hbv=hbv_in,
+                    hbv=hbv_in,
                 )
                 
                 
@@ -682,7 +682,7 @@ class Trainer_MultiTask(Trainer):
                 adc_s, t2w_s = self.ema.ema_model.sample(
                     adc      = cond_adc,
                     t2w      = cond_t2w,
-                    cond_hbv = hbv_in,
+                    hbv      = hbv_in,
                     batch_size=cond_adc.shape[0],
                     return_all_timesteps=False
                 )
