@@ -70,23 +70,25 @@ def add_batch_metrics_to_list(prediction, highres, mse_list, psnr_list, ssim_lis
     return mse_list, psnr_list, ssim_list
 
 
-def run_diffusion(diffusion, lowres, t2w_input, unet_type, controlnet=False, perform_uq=False, num_rep=None):
+def run_diffusion(diffusion, model_input, unet_type, controlnet=False, perform_uq=False, num_rep=None):
     """
     Unified diffusion sampling call.
     - lowres: the conditioned input (e.g., downsampled ADC)
     - t2w_input: optional extra conditioning (T2W) either as image tensor or embedding tuple/list
     - controlnet: toggles whether the conditioning is passed as `control` vs `t2w`
     """
-    kwargs = {"batch_size": lowres.shape[0]}
+    kwargs = {"batch_size": model_input['lowres'].shape[0]}
     # Add optional conditioning kwargs
-    if t2w_input is not None:
-        kwargs["control" if controlnet else "t2w"] = t2w_input
+    if model_input['t2w'] is not None:
+        kwargs["control" if controlnet else "t2w"] = model_input['t2w']
+    if model_input['hbv'] is not None:
+        kwargs["hbv"] = model_input['hbv']
     kwargs['perform_uq'] = perform_uq  # Disable multiple reruns for standard sampling
     kwargs['num_rep']    = num_rep if perform_uq else None  # Number of samples for UQ
     
     # Sampling is inference-only
     with torch.no_grad():
-        pred = diffusion.sample(lowres, **kwargs)
+        pred = diffusion.sample(model_input['lowres'], **kwargs)
         
     if unet_type == 'multitask':
         pred = pred[0] # pred[1] is t2w -> deal with this later
@@ -113,31 +115,51 @@ def get_target_prediction(batch, model_output, vae=None):
         
     return target, prediction
 
-def get_batch_images(dataloader, device, use_T2W, vae=None, batch=None):
+def get_batch_images(dataloader, device, use_T2W, use_HBV, vae=None, batch=None):
     """
     Fetch one batch from dataloader and move relevant tensors to device.
     Optionally:
       - encode lowres (and t2w) into latent space using a VAE
       - collect T2W conditioning if requested
     Returns:
-      highres, lowres, t2w_input, batch
+      highres, lowres, t2w, hbv, batch
     """
     if batch is None:
         batch   = next(iter(dataloader))
-    highres = batch['ADC_input'].to(device)
-    lowres  = batch['ADC_condition'].to(device)
     
+    model_images = {
+        'highres': batch['ADC_input'].to(device),
+        'lowres':  batch['ADC_condition'].to(device),
+        't2w_lowres':  None,
+        't2w_highres': None,
+        'hbv':     None
+    }
+    
+    model_input = {
+        'lowres': batch['ADC_condition'].to(device),
+        't2w':    None,
+        'hbv':    None
+    }
+            
     if vae is not None:
-        lowres, _ = encode_latent(lowres, vae)
+        model_input['lowres'], _ = encode_latent(model_input['lowres'], vae)
         
     if use_T2W:
-        t2w_input = get_t2w_input(batch, device)
+        t2w = get_t2w_input(batch, device)
+        model_input['t2w']  = t2w
+        
+        model_images['t2w_lowres']  = t2w
+        model_images['t2w_highres'] = batch['T2W_input'].to(device)
+        
         if vae is not None:
-            t2w_input,_ = encode_latent(t2w_input, vae)
-    else:
-        t2w_input = None
+            model_input['t2w'],_ = encode_latent(model_input['t2w'], vae)        
+        
+    if use_HBV:
+        hbv = batch['HBV'].to(device)
+        model_input['hbv']  = hbv
+        model_images['hbv'] = hbv
     
-    return highres, lowres, t2w_input, batch   
+    return model_input, model_images, batch   
 
 def log_metrics_to_csv(args, mse, psnr,ssim,csv_path='/cluster/project7/ProsRegNet_CellCount/CriDiff/results.csv'):
     """
@@ -344,7 +366,7 @@ def plot_uq_t2w_overlay(t2w_img, pred_std, fig, axes, i, j, colorbar=True):
     axes[i, j].axis('off')
 
 
-def create_plot(batch_size, use_T2W, num_rep=None, offset=False, add_error=False, avg_std=False, uq_t2w_overlay=False):
+def create_plot(batch_size, use_T2W, use_HBV, num_rep=None, offset=False, add_error=False, avg_std=False, uq_t2w_overlay=False):
     """
     Create a figure grid and set titles for the first row.
     Supports three modes:
@@ -353,6 +375,9 @@ def create_plot(batch_size, use_T2W, num_rep=None, offset=False, add_error=False
       3) num_rep set + offset=True: multiple pairs (T2W, SR) for per-rep T2W sampling
     """
     titles = ["Low res (Input)"]
+
+    if use_HBV:
+        titles += ["HBV (Input)"]
     
     if num_rep is None: # Single SR output case
         if use_T2W:
@@ -413,7 +438,7 @@ def decode_all_UQ(pred,vae):
 
 def visualize_batch(
     args, diffusion, dataloader, device,
-    controlnet=False, output_name="test_image", vae=None, add_error=True, perform_uq=False, num_rep=None
+    output_name="test_image", vae=None, add_error=True, perform_uq=False, num_rep=None
 ):
     """
     Visualize a single batch:
@@ -430,45 +455,36 @@ def visualize_batch(
 
     uq_t2w_overlay = False # Set to False for now; could be set to True if the overlay plot is desired after enabling T2W input
 
-    fig, axes, ncols = create_plot(args.batch_size, args.use_T2W, num_rep=num_rep, add_error=add_error, avg_std=avg_std, uq_t2w_overlay=uq_t2w_overlay)
-    highres, lowres, t2w_input, batch = get_batch_images(dataloader, device, args.use_T2W, vae)
+    fig, axes, ncols = create_plot(args.batch_size, args.use_T2W, args.use_HBV, num_rep=num_rep, add_error=add_error, avg_std=avg_std, uq_t2w_overlay=uq_t2w_overlay)
+    model_input, model_images, batch = get_batch_images(dataloader, device, args.use_T2W, args.use_HBV, vae)
     
     # Run model sampling
-    if diffusion is not None:
-        pred = run_diffusion(diffusion, lowres, t2w_input, args.unet_type, args.controlnet, perform_uq, num_rep)
-        
-        if perform_uq:
-            decoded_x0, pred_mean, pred_std = decode_all_UQ(pred, vae)
-        elif vae is not None:
-            pred = decode_latent(pred, vae)[:,0,:,:]
+    pred = run_diffusion(diffusion, model_input, args.unet_type, args.controlnet, perform_uq, num_rep)
     
-    if vae is not None:
-        lowres = decode_latent(lowres, vae)[:,0,:,:]
-        
-    # else:
-    #     lowres    = batch['ADC_condition']
-    #     full_size = lowres.shape[-1]
-    #     for i in range(batch_size):
-    #         lowres[i] = cv2.resize(lowres[i], (full_size//2,full_size//2))
-    #         lowres[i] = cv2.resize(lowres[i], (full_size,full_size), interpolation=cv2.INTER_LINEAR)
-    #     lowres    = lowres.to(device)
-    
-    if args.use_T2W:
-        t2w_input = get_t2w_input(batch, device)
+    # Uncertainty quantification
+    if perform_uq:
+        decoded_x0, pred_mean, pred_std = decode_all_UQ(pred, vae)
+    elif vae is not None:
+        pred = decode_latent(pred, vae)[:,0,:,:]
     
     for i in range(args.batch_size):
         count = 0
         # Column 0: lowres input
-        plot_image(lowres[i], fig, axes, i, 0)
+        plot_image(model_images['lowres'][i], fig, axes, i, 0)
+
+        # OPTIONAL: HBV input
+        if args.use_HBV:
+            count += 1
+            plot_image(model_images['hbv'][i], fig, axes, i, count)
         
         if num_rep is None:
             # Column 1 (optional): T2W input
             if args.use_T2W:
                 count += 1                    
                 if "T2W_embed" in batch:
-                    plot_image(t2w_input[0][i], fig, axes, i, 1)
+                    plot_image(model_images['t2w_lowres'][0][i], fig, axes, i, 1)
                 else:
-                    plot_image(t2w_input[i], fig, axes, i, 1)
+                    plot_image(model_images['t2w_lowres'][i], fig, axes, i, 1)
                     
             # Column 2: High res (SR Output)
             plot_image(pred[i], fig, axes, i, count+1)
@@ -476,14 +492,14 @@ def visualize_batch(
             # Column 3 (optional): Error
             if add_error:
                 plot_image(pred[i], fig, axes, i, count+2, False)
-                plot_error(pred[i], highres[i], fig, axes, i, count+2)
+                plot_error(pred[i], model_images['highres'][i], fig, axes, i, count+2)
                 count += 2
                 
         else:
             if args.use_T2W:
                 count += 1
                 # Add t2w_embed stuff?
-                plot_image(t2w_input[i], fig, axes, i, 1)
+                plot_image(model_images['t2w_lowres'][i], fig, axes, i, 1)
                     
             # Columns (x num_rep): High res (SR Outputs)
             for rep in range(num_rep):
@@ -495,15 +511,15 @@ def visualize_batch(
             count += 2
 
         # Ground truth (last column)
-        plot_image(highres[i], fig, axes, i, count+1)
+        plot_image(model_images['highres'][i], fig, axes, i, count+1)
 
         # T2W with uncertainty overlay (optional)
         if args.use_T2W and uq_t2w_overlay:
-            plot_uq_t2w_overlay(t2w_input[i], pred_std[i], fig, axes, i, ncols-2)
+            plot_uq_t2w_overlay(model_images['t2w_highres'][i], pred_std[i], fig, axes, i, ncols-2)
     
         # UQ error column (optional)
         if add_error and num_rep is not None:
-            plot_uq_error_corr(pred_mean[i], highres[i], pred_std[i], fig, axes, i, ncols-1)
+            plot_uq_error_corr(pred_mean[i], model_images['highres'][i], pred_std[i], fig, axes, i, ncols-1)
 
         # # Calibration coverage of gt HR ADC within x0_samples (optional)
         # coverage_x0_gt = uq_calibration(decoded_x0[i], highres[i])
@@ -511,10 +527,14 @@ def visualize_batch(
     
     fig.tight_layout(pad=0.25)
     save_path = os.path.join('./test_images', output_name+'.jpg')
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path)
     plt.close()
     print(f"Saved visualization to {save_path}")
 
+
+# -------------------------------------------------
+# -------------------------------------------------
 
 def visualize_variability(
     args, diffusion, dataloader, device, 
@@ -559,6 +579,7 @@ def visualize_variability(
 
     fig.tight_layout(pad=0.25)
     save_path = os.path.join('./test_images', output_name+'_variability.jpg')
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path)
     plt.close()
     print(f"Saved visualization to {save_path}")
@@ -608,7 +629,7 @@ def visualize_variability_t2w(
         mean_pred = np.mean(all_pred, axis=0)
         std_pred  = np.std(all_pred, axis=0)
 
-    for i in range(batch_size):
+    for i in range(args.batch_size):
         # Column 0: lowres
         plot_image(lowres[i], fig, axes, i, 0)
         # For each rep: (T2W, pred) columns
@@ -624,6 +645,7 @@ def visualize_variability_t2w(
 
     fig.tight_layout(pad=0.25)
     save_path = os.path.join('./test_images', output_name+'_variability_t2w.jpg')
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path)
     plt.close()
     print(f"Saved visualization to {save_path}")
@@ -664,6 +686,7 @@ def visualize_batch_vae(vae, dataloader, accelerator, output_name, greyscale=Fal
 
     fig.tight_layout(pad=0.25)
     save_path = os.path.join('./test_images', output_name+'.jpg')
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path)
     plt.close()
     print(f"Saved visualization to {save_path}")
