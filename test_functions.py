@@ -78,7 +78,6 @@ def run_diffusion(diffusion, model_input, unet_type, controlnet=False, perform_u
     - controlnet: toggles whether the conditioning is passed as `control` vs `t2w`
     """
     kwargs = {"batch_size": model_input['lowres'].shape[0]}
-    # Add optional conditioning kwargs
     if model_input['t2w'] is not None:
         kwargs["control" if controlnet else "t2w"] = model_input['t2w']
     if model_input['hbv'] is not None:
@@ -88,16 +87,11 @@ def run_diffusion(diffusion, model_input, unet_type, controlnet=False, perform_u
     
     # Sampling is inference-only
     with torch.no_grad():
-        if unet_type == 'multitask':
-            # Multitask model requires both adc and t2w conditioning as positional args
-            pred = diffusion.sample(model_input['lowres'], t2w=model_input['t2w'], **kwargs)
-            pred = pred[0]  # Extract ADC output; pred[1] is T2W
-        else:
-            if model_input['t2w'] is not None:
-                kwargs["control" if controlnet else "t2w"] = model_input['t2w']
-            
-            pred = diffusion.sample(model_input['lowres'], **kwargs)
+        pred = diffusion.sample(model_input['lowres'], **kwargs)
 
+    if unet_type == 'multitask':
+        pred = pred[0]
+            
     return pred
 
 def get_target_prediction(batch, model_output, vae=None):
@@ -145,7 +139,7 @@ def get_batch_images(dataloader, device, use_T2W, use_HBV, vae=None, batch=None)
         't2w':    None,
         'hbv':    None
     }
-            
+                
     if vae is not None:
         model_input['lowres'], _ = encode_latent(model_input['lowres'], vae)
         
@@ -208,7 +202,7 @@ def evaluate_results(args, diffusion, dataloader, device, vae=None):
     
     for batch in dataloader:
         # Base conditioning input, Optional T2W for the diffusion model
-        _, lowres, t2w_input, _ = get_batch_images(dataloader, device, args.use_T2W, vae, batch)
+        _, lowres, t2w_input, _ = get_batch_images(dataloader, device, args.use_T2W, args.use_HBV, vae, batch)
 
         # Sample SR output
         model_output  = run_diffusion(diffusion, lowres, t2w_input, args.unet_type, args.controlnet)
@@ -452,7 +446,7 @@ def visualize_batch(
       - SR prediction
       - optional error map
       - highres ground truth
-    """
+    """    
     if num_rep is not None:
         avg_std, add_error = True, True    
     else:
@@ -470,6 +464,7 @@ def visualize_batch(
     if perform_uq:
         decoded_x0, pred_mean, pred_std = decode_all_UQ(pred, vae)
     elif vae is not None:
+        print("Decoding VAE latent space for visualization...")
         pred = decode_latent(pred, vae)[:,0,:,:]
     
     for i in range(args.batch_size):
@@ -487,9 +482,9 @@ def visualize_batch(
             if args.use_T2W:
                 count += 1                    
                 if "T2W_embed" in batch:
-                    plot_image(model_images['t2w_lowres'][0][i], fig, axes, i, 1)
+                    plot_image(model_images['t2w_lowres'][0][i], fig, axes, i, count)
                 else:
-                    plot_image(model_images['t2w_lowres'][i], fig, axes, i, 1)
+                    plot_image(model_images['t2w_lowres'][i], fig, axes, i, count)
                     
             # Column 2: High res (SR Output)
             plot_image(pred[i], fig, axes, i, count+1)

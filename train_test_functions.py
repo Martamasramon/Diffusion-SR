@@ -155,15 +155,10 @@ def load_model(args, model, diffusion, device):
     if args.controlnet:
         load_pretrained_with_controlnet(diffusion, checkpoint)
     else:
-        # checkpoint['model'] contains the UNet/model state_dict saved during training.
         model_state = remap_checkpoints(checkpoint['model'], model)
-        missing, unexpected = model.load_state_dict(model_state, strict=False)
+        missing, unexpected = diffusion.load_state_dict(model_state, strict=False)
 
-    # Move model to device and attach to diffusion
-    model.eval()
-    model.to(device)
-    diffusion.model = model
-    diffusion.to(device)
+    diffusion.to(device).eval()
     
 def load_data(args, data_type='train'):
     print(f'Loading data ({data_type})...')
