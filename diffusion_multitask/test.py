@@ -1,4 +1,4 @@
-import os 
+import os
 import sys
 sys.path.append('../')
 from test_functions import visualize_batch, evaluate_results
@@ -9,7 +9,10 @@ from train_test_functions import (
 )
  
 def main():
-    device    = set_device()
+    args.use_T2W    = True
+    args.unet_type  = 'multitask'
+    
+    device     = set_device()
     
     model     = build_UNet(args)
     diffusion = build_diffusion(args, model)

@@ -1,29 +1,18 @@
 import math
 from pathlib import Path
-from random import random
-from functools import partial
-from collections import namedtuple
 
 import torch
-from torch import nn
-from torch.cuda.amp import autocast
-import torch.nn.functional as F
-
 from torch.optim import Adam
 from torchvision import transforms as T, utils
-
-from einops import rearrange, reduce
-from tqdm.auto import tqdm
-
-import sys
-sys.path.append('/models')
-from network_utils   import *
-from network_modules import *
-from VAE import encode_latent, decode_latent
-from Diffusion   import Losses
+from tqdm.auto   import tqdm
 from ema_pytorch import EMA
-from transforms import downsample_transform
 
+from models.network_utils import (
+    cycle, num_to_groups, has_int_squareroot, divisible_by, extract, exists
+)
+from models.VAE import encode_latent, decode_latent
+from models.Diffusion   import Losses
+from transforms import downsample_transform
 
 class Trainer(object):
     def __init__(
@@ -33,7 +22,6 @@ class Trainer(object):
         test_dataloader,
         accelerator,
         *,
-        use_T2W                     = False,
         use_T2W_embed               = False,
         finetune_controlnet         = False,
         batch_size                  = 16,
@@ -54,7 +42,7 @@ class Trainer(object):
         split_batches               = True,
         inception_block_idx         = 2048,
         max_grad_norm               = 1.,
-        save_best_and_latest_only   = False,
+        save_best_and_latest_only   = True,
         wandb_run                   = None, 
         vae                         = None,
         image_loss_weights          = {'mse':1, 'ssim':0, 'perct': 0.01},
@@ -64,12 +52,15 @@ class Trainer(object):
         self.accelerator    = accelerator
         self.model          = diffusion_model
         self.channels       = diffusion_model.input_img_channels
-        is_ddim_sampling    = diffusion_model.is_ddim_sampling
+        self.is_ddim_sampling    = diffusion_model.is_ddim_sampling
 
         self.img_size       = img_size        
-        self.use_T2W        = use_T2W
+        self.use_T2W        = self.model.use_T2W 
         self.use_T2W_embed  = use_T2W_embed
+        self.use_HBV        = self.model.use_HBV 
         self.finetune_controlnet = finetune_controlnet
+        
+        assert save_every%val_every==0 and sample_every%val_every==0, "save_every and sample_every should be multiples of val_every for consistent milestone logging and validation frequency."
         
         if self.finetune_controlnet:
             assert getattr(self.model, "controlnet", None) is not None, "finetune_controlnet_only=True but model.controlnet is None."
@@ -208,6 +199,7 @@ class Trainer(object):
             with self.accelerator.autocast():
                 control = data['T2W_condition'] if self.model.controlnet else None
                 t2w_in  = data['T2W_condition'] if (self.use_T2W and self.model.controlnet is None) else None
+                hbv_in  = data['HBV'] if self.use_HBV else None
                 if 'ADC_target' in data.keys():
                     defined_target = data['ADC_target'] 
                     eval_transform = downsample_transform(self.img_size) 
@@ -215,11 +207,12 @@ class Trainer(object):
                     defined_target, eval_transform = None, None
                 
                 losses = {}
+
                 if self.use_T2W_embed:
                     data['T2W_embed'] = [t.squeeze(1) for t in data['T2W_embed']]
-                    prediction, loss, losses['mse'], losses['perct'], losses['ssim'], t = self.model(data['ADC_input'], data['ADC_condition'], data['T2W_embed'], control, defined_target, eval_transform)
+                    prediction, loss, losses['mse'], losses['perct'], losses['ssim'], t = self.model(data['ADC_input'], data['ADC_condition'], data['T2W_embed'], hbv_in, control, defined_target, eval_transform)
                 else:
-                    prediction, loss, losses['mse'], losses['perct'], losses['ssim'], t = self.model(data['ADC_input'], data['ADC_condition'], t2w_in,            control,  defined_target, eval_transform)
+                    prediction, loss, losses['mse'], losses['perct'], losses['ssim'], t = self.model(data['ADC_input'], data['ADC_condition'], t2w_in           , hbv_in, control, defined_target, eval_transform)
                 
                 if self.vae is not None and self.image_loss_weights is not None:
                     reconstruction = decode_latent(prediction, self.vae)[:, 0, :, :].unsqueeze(1) 
@@ -257,6 +250,7 @@ class Trainer(object):
             batches         = num_to_groups(self.num_samples, self.batch_size)
             sample_lowres   = data['ADC_condition'][:self.num_samples].to(self.accelerator.device)
             sample_t2w      = data['T2W_condition'][:self.num_samples].to(self.accelerator.device) if (self.model.controlnet is not None) or self.model.use_T2W else None
+            sample_hbv      = data['HBV'][:self.num_samples].to(self.accelerator.device) if self.model.use_HBV else None
             
             if 'T2W_embed' in data:
                 sample_t2w_embed = []
@@ -272,17 +266,18 @@ class Trainer(object):
                 end = min(start + n, total)
                 low_res = sample_lowres[start:end]
                 t2w     = sample_t2w[start:end] if sample_t2w is not None else None
+                hbv     = sample_hbv[start:end] if sample_hbv is not None else None 
 
                 if low_res.shape[0] == 0:
                     break  # no more valid conditioning inputs
                 
                 if 'T2W_embed' in data:
                     t2w_embed = sample_t2w_embed[start:end]
-                    images    = self.ema.ema_model.sample(batch_size=low_res.shape[0], low_res=low_res, t2w=t2w_embed)
+                    images    = self.ema.ema_model.sample(batch_size=low_res.shape[0], low_res=low_res, t2w=t2w_embed, hbv=hbv)
                 else:
                     control = t2w if self.model.controlnet else None
                     t2w_in  = t2w if (self.model.use_T2W and self.model.controlnet is None) else None
-                    images  = self.ema.ema_model.sample(batch_size=low_res.shape[0], low_res=low_res, control=control, t2w=t2w_in)
+                    images  = self.ema.ema_model.sample(batch_size=low_res.shape[0], low_res=low_res, control=control, t2w=t2w_in, hbv=hbv)
                     
                 all_images_list.append(images)
                 start = end
@@ -329,7 +324,7 @@ class Trainer(object):
                 _, total_loss_train, total_losses_train = self.calc_loss(train=True)
                 
                 # Validate every few steps to reduce overhead 
-                do_val = (self.step % self.val_every == 0)
+                do_val = ((self.step + 1) % self.val_every == 0)
                 if do_val:
                     with torch.no_grad():
                         data, total_loss_val, total_losses_val = self.calc_loss(train=False)
@@ -356,7 +351,7 @@ class Trainer(object):
                     # Save model 
                     if self.step != 0 and divisible_by(self.step, self.save_every):
                         milestone = self.step // self.save_every
-                        if self.save_best_and_latest_only and do_val:
+                        if self.save_best_and_latest_only:
                             if 'mse' in total_losses_val:
                                 val_mse = total_losses_val['mse']
                             else:
@@ -414,19 +409,21 @@ class Trainer_MultiTask(Trainer):
         self,
         *args,
         save_t2w_samples: bool = True,
+        modality_dropout_p_adc: float = 0.0,
+        modality_dropout_p_t2w: float = 0.0,
         **kwargs
     ):
         super().__init__(*args, **kwargs)
 
         self.save_t2w_samples = save_t2w_samples
+        
+        self.modality_dropout_p_adc = modality_dropout_p_adc
+        self.modality_dropout_p_t2w = modality_dropout_p_t2w
 
         if self.vae is not None:
             self.image_loss = Losses()
             self.image_loss = self.accelerator.prepare(self.image_loss)
 
-    # -------------------------
-    # Helpers
-    # -------------------------
     def _move_batch_to_device(self, data: dict):
         for key, value in data.items():
             try:
@@ -538,10 +535,49 @@ class Trainer_MultiTask(Trainer):
         logs[f"{prefix}_recon_total"] = recon_total.mean()
 
         return loss, logs
+    
+    def _apply_modality_dropout(self, data: dict):
+        """
+        During training, randomly zero out ADC_condition and/or T2W_condition.
 
-    # -------------------------
-    # Core train/val loss
-    # -------------------------
+        - If exclusive: at most one modality is dropped per sample.
+        - Operates on whatever is in data (latent or image space), so call AFTER _maybe_encode_latents.
+        """
+        p_adc = float(self.modality_dropout_p_adc or 0.0)
+        p_t2w = float(self.modality_dropout_p_t2w or 0.0)
+        if p_adc <= 0.0 and p_t2w <= 0.0:
+            return data
+
+        device = self.accelerator.device
+
+        cond_adc = data.get("ADC_condition", None)
+        cond_t2w = data.get("T2W_condition", None)
+        if not isinstance(cond_adc, torch.Tensor) or not isinstance(cond_t2w, torch.Tensor):
+            return data
+        B = cond_adc.shape[0]
+
+        # per-sample categorical: {none, drop_adc, drop_t2w} -> p = [1 - p_adc - p_t2w, p_adc, p_t2w]
+        p_none = max(0.0, 1.0 - (p_adc + p_t2w))
+        probs = torch.tensor([p_none, p_adc, p_t2w], device=device, dtype=torch.float32)
+        probs = probs / probs.sum().clamp_min(1e-8)
+
+        # sample categories
+        cat = torch.multinomial(probs, num_samples=B, replacement=True)  # 0,1,2
+        drop_adc = (cat == 1)
+        drop_t2w = (cat == 2)
+
+        # broadcast masks to [B, C, H, W] (or any [B, ...])
+        while drop_adc.ndim < cond_adc.ndim:
+            drop_adc = drop_adc.view(*drop_adc.shape, 1)
+        while drop_t2w.ndim < cond_t2w.ndim:
+            drop_t2w = drop_t2w.view(*drop_t2w.shape, 1)
+
+        # zero-fill (blank condition)
+        data["ADC_condition"] = torch.where(drop_adc, torch.zeros_like(cond_adc), cond_adc)
+        data["T2W_condition"] = torch.where(drop_t2w, torch.zeros_like(cond_t2w), cond_t2w)
+
+        return data
+
     def calc_loss(self, train=True):
         if train:
             if self.finetune_controlnet:
@@ -565,17 +601,21 @@ class Trainer_MultiTask(Trainer):
         for _ in range(self.gradient_accumulate_every):
             data = next(dataloader)
 
-            # Move to device & encode latents if needed
+            # Move to device, encode latents (if needed) & apply modality dropout 
             data = self._move_batch_to_device(data)
             data = self._maybe_encode_latents(data)
+            data = self._apply_modality_dropout(data)
 
             with self.accelerator.autocast():
+                hbv_in = data.get("HBV", None)
                 out = self.model(
                     data["ADC_input"],
                     data["ADC_condition"],
                     data["T2W_input"],
                     data["T2W_condition"],
+                    hbv=hbv_in,
                 )
+                
                 
                 pred_adc, pred_t2w, loss, logs, t = self._parse_multitask_forward_output(out)
 
@@ -612,9 +652,6 @@ class Trainer_MultiTask(Trainer):
 
         return data, total_loss, total_losses
 
-    # -------------------------
-    # Sampling
-    # -------------------------
     def sample_images(self, data):
         """
         Save grids of ADC and (optionally) T2W samples from EMA model.
@@ -641,9 +678,11 @@ class Trainer_MultiTask(Trainer):
                     break
 
                 # EMA model returns (adc, t2w) for multitask sample()
+                hbv_in = data["HBV"][start:end] if self.model.use_HBV else None
                 adc_s, t2w_s = self.ema.ema_model.sample(
-                    cond_adc=cond_adc,
-                    cond_t2w=cond_t2w,
+                    adc      = cond_adc,
+                    t2w      = cond_t2w,
+                    hbv      = hbv_in,
                     batch_size=cond_adc.shape[0],
                     return_all_timesteps=False
                 )

@@ -2,6 +2,7 @@ import torch
 from torch       import nn
 from random      import random
 from collections import namedtuple
+from functools   import partial
 
 from network_utils      import *
 from network_modules    import *
@@ -30,7 +31,6 @@ class Diffusion_MultiTask(Diffusion):
         print("  ADC loss weights:", self.loss_weights_adc)
         print("  T2W loss weights:", self.loss_weights_t2w)
 
-    # ---------- helpers ----------
     def _correlated_noise(self, shape, device, dtype, generator=None):
         """
         Returns (eps_adc, eps_t2w) with correlation rho.
@@ -87,13 +87,13 @@ class Diffusion_MultiTask(Diffusion):
         return torch.randn(x.shape, device=x.device, dtype=x.dtype, generator=generator)
 
     # ------------------------------------------------------------------------------
-    # ------------------------------------------------------------------------------
     def model_predictions_mt(
         self,
         x_adc, cond_adc,
         x_t2w, cond_t2w,
         t,
         *,
+        hbv=None,
         x_self_cond_adc=None, x_self_cond_t2w=None,
         control      = None,
         clip_x_start = False,
@@ -110,7 +110,8 @@ class Diffusion_MultiTask(Diffusion):
             t,
             x_self_cond_adc=x_self_cond_adc,
             x_self_cond_t2w=x_self_cond_t2w,
-            control=control
+            control=control,
+            hbv=hbv,
         )
 
         maybe_clip = partial(torch.clamp, min=-1., max=1.) if clip_x_start else (lambda z: z)
@@ -150,6 +151,7 @@ class Diffusion_MultiTask(Diffusion):
         x_t2w, cond_t2w,
         t,
         *,
+        hbv=None,
         x_self_cond_adc=None, x_self_cond_t2w=None,
         control       = None,
         clip_denoised = True
@@ -164,6 +166,7 @@ class Diffusion_MultiTask(Diffusion):
             x_self_cond_adc=x_self_cond_adc,
             x_self_cond_t2w=x_self_cond_t2w,
             control=control,
+            hbv=hbv,
             clip_x_start=clip_denoised,
             rederive_pred_noise=True
         )
@@ -184,6 +187,7 @@ class Diffusion_MultiTask(Diffusion):
         x_t2w, cond_t2w,
         t_scalar: int,
         *,
+        hbv=None,
         x_self_cond_adc=None, x_self_cond_t2w=None,
         control   = None,
         generator = None
@@ -200,6 +204,7 @@ class Diffusion_MultiTask(Diffusion):
             x_self_cond_adc=x_self_cond_adc,
             x_self_cond_t2w=x_self_cond_t2w,
             control=control,
+            hbv=hbv,
             clip_denoised=True
         )
 
@@ -218,6 +223,7 @@ class Diffusion_MultiTask(Diffusion):
         self,
         shape,
         cond_adc, cond_t2w,
+        hbv=None,
         *,
         control   = None,
         return_all_timesteps = False,
@@ -246,7 +252,8 @@ class Diffusion_MultiTask(Diffusion):
                 x_self_cond_adc=self_cond_adc,
                 x_self_cond_t2w=self_cond_t2w,
                 control=control,
-                generator=generator
+                generator=generator,
+                hbv=hbv,
             )
             if return_all_timesteps:
                 xs_adc.append(x_adc)
@@ -266,6 +273,7 @@ class Diffusion_MultiTask(Diffusion):
         shape,
         cond_adc, cond_t2w,
         *,
+        hbv=None,
         control   = None,
         return_all_timesteps = False,
         generator  =None
@@ -303,6 +311,7 @@ class Diffusion_MultiTask(Diffusion):
                 x_self_cond_adc=self_cond_adc,
                 x_self_cond_t2w=self_cond_t2w,
                 control=control,
+                hbv=hbv,
                 clip_x_start=True,
                 rederive_pred_noise=True
             )
@@ -344,23 +353,13 @@ class Diffusion_MultiTask(Diffusion):
         return x_adc, x_t2w
 
     @torch.no_grad()
-    def sample(
-        self,
-        cond_adc, cond_t2w,
-        *,
-        batch_size  = 16,
-        return_all_timesteps = False,
-        control     = None,
-        perform_uq  = False,
-        num_rep     = None,
-        generator   = None,
-    ):
+    def sample(self,adc,control=None,batch_size=16,return_all_timesteps=False,t2w=None,hbv=None,perform_uq=False,num_rep=None):
         """
         Returns:
           - if perform_uq: (adc_samples, t2w_samples) each shaped [B, R, C, H, W] (or [B, R, T, C, H, W] if return_all_timesteps)
           - else: (adc, t2w) each shaped [B, C, H, W] (or [B, T, C, H, W] if return_all_timesteps)
 
-        You must pass cond_adc and cond_t2w already on the correct device.
+        adc and t2w should be the conditioning inputs already on the correct device.
         """
         image_size = self.image_size
         channels = 1  # if yours differ, set from your training setup
@@ -381,16 +380,17 @@ class Diffusion_MultiTask(Diffusion):
             for s in seeds:
                 g = torch.Generator(device=self.device)
                 g.manual_seed(int(s.item()))
-                adc, t2w = sample_fn(
+                adc_out, t2w_out = sample_fn(
                     shape,
-                    cond_adc,
-                    cond_t2w,
+                    adc,
+                    t2w,
                     control=control,
                     return_all_timesteps=return_all_timesteps,
-                    generator=g
+                    generator=g,
+                    hbv=hbv,
                 )
-                adc_list.append(adc)
-                t2w_list.append(t2w)
+                adc_list.append(adc_out)
+                t2w_list.append(t2w_out)
 
             # stack along rep dimension
             adc = torch.stack(adc_list, dim=1)
@@ -400,11 +400,12 @@ class Diffusion_MultiTask(Diffusion):
         else:
             return sample_fn(
                 shape,
-                cond_adc,
-                cond_t2w,
+                adc,
+                t2w,
                 control=control,
                 return_all_timesteps=return_all_timesteps,
-                generator=generator
+                generator=None,
+                hbv=hbv
             )
 
     def p_losses(
@@ -413,6 +414,7 @@ class Diffusion_MultiTask(Diffusion):
         x0_t2w, cond_t2w,
         t,
         *,
+        hbv=None,
         defined_target_adc = None, defined_target_t2w = None,
         eval_transform_adc = None, eval_transform_t2w = None,
         control = None,
@@ -443,7 +445,8 @@ class Diffusion_MultiTask(Diffusion):
                 # predict x_start for each branch (normalized space), detach
                 out_adc_tmp, out_t2w_tmp = self.model(
                     x_adc_t, cond_adc, x_t2w_t, cond_t2w, t,
-                    x_self_cond_adc=None, x_self_cond_t2w=None, control=control
+                    x_self_cond_adc=None, x_self_cond_t2w=None, control=control,
+                    hbv=hbv,
                 )
                 x_self_cond_adc = self._xstart_from_model_output(x_adc_t, t, out_adc_tmp).detach()
                 x_self_cond_t2w = self._xstart_from_model_output(x_t2w_t, t, out_t2w_tmp).detach()
@@ -452,7 +455,8 @@ class Diffusion_MultiTask(Diffusion):
         pred_adc, pred_t2w = self.model(
             x_adc_t, cond_adc, x_t2w_t, cond_t2w, t,
             x_self_cond_adc=x_self_cond_adc, x_self_cond_t2w=x_self_cond_t2w,
-            control=control
+            control=control,
+            hbv=hbv,
         )
 
         # x_start preds (normalized)
@@ -521,6 +525,7 @@ class Diffusion_MultiTask(Diffusion):
         x0_adc, cond_adc,
         x0_t2w, cond_t2w,
         *,
+        hbv=None,
         defined_target_adc=None, defined_target_t2w=None,
         eval_transform_adc=None, eval_transform_t2w=None,
         control=None,
@@ -540,6 +545,7 @@ class Diffusion_MultiTask(Diffusion):
             x0_adc, cond_adc, 
             x0_t2w, cond_t2w, 
             t,
+            hbv=hbv,
             defined_target_adc=defined_target_adc, defined_target_t2w=defined_target_t2w,
             eval_transform_adc=eval_transform_adc, eval_transform_t2w=eval_transform_t2w,
             control=control,

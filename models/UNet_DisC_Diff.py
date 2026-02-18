@@ -61,12 +61,10 @@ class UNet_Basic(nn.Module):
         super().__init__()
 
         self.image_size         = image_size
-        base_channels = 2       # x + low_res
-        if use_T2W:
-            base_channels += 1
-        if use_HBV:
-            base_channels += 1  
-        self.in_channels        = base_channels + (1 if self_condition else 0)
+        self.self_condition     = self_condition
+        self.use_T2W            = use_T2W
+        self.use_HBV            = use_HBV        
+        self.in_channels        = in_channels if in_channels is not None else self._get_in_channels()
         self.model_channels     = model_channels
         self.out_channels       = 1 
         self.num_res_blocks     = num_res_blocks
@@ -80,9 +78,6 @@ class UNet_Basic(nn.Module):
         self.num_head_channels  = num_head_channels
         self.num_heads_upsample = num_heads
         self.dims               = dims
-        self.self_condition     = self_condition
-        self.use_T2W            = use_T2W
-        self.use_HBV            = use_HBV
         
         # Make compatible with diffusion script
         self.input_img_channels = 1
@@ -237,6 +232,16 @@ class UNet_Basic(nn.Module):
             zero_module(conv_nd(self.dims , ch, self.out_channels, 3, padding=1)),
         )
 
+    def _get_in_channels(self):
+        base_channels = 2       # x + low_res
+        if self.use_T2W:
+            base_channels += 1
+        if self.use_HBV:
+            base_channels += 1  
+            
+        return base_channels + (1 if self.self_condition else 0)
+        
+        
     def convert_to_fp16(self):
         """
         Convert the torso of the model to float16.
@@ -330,6 +335,7 @@ class UNet_DisC_Diff(UNet_Basic):
         self.SE_Attention_dist_1 = SE_Attention(channel=enc_ch//2, reduction=8)
         self.SE_Attention_dist_2 = SE_Attention(channel=enc_ch//2, reduction=8)
         self.SE_Attention_dist_3 = SE_Attention(channel=enc_ch//2, reduction=8)
+        self.SE_Attention_dist_4 = SE_Attention(channel=enc_ch//2, reduction=8)
 
         self.dim_reduction_non_zeros = nn.Sequential(
             conv_nd(self.dims , 2 * enc_ch, enc_ch, 1, padding=0),

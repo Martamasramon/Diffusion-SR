@@ -1,6 +1,7 @@
 from torch      import nn
 from functools  import partial
-from network_modules import ResnetBlock, Downsample, Residual, PreNorm, LinearCrossAttention, ZeroConv2d
+from network_modules import ResnetBlock, Residual, PreNorm, LinearCrossAttention, ZeroConv2d
+from network_utils   import Downsample
 
 class ControlNet(nn.Module):
     """

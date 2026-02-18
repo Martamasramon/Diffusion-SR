@@ -19,6 +19,7 @@ class MyDataset(Dataset):
         image_size      = 64,
         t2w             = False, 
         t2w_embed       = False, 
+        hbv             = False,
         is_finetune     = False, 
         surgical_only   = False,
         t2w_model_drop  = [0.1,0.5],
@@ -40,17 +41,18 @@ class MyDataset(Dataset):
         self.upsample   = 'x4' if upsample else ''
         self.t2w_embed  = t2w_embed
         self.use_T2W    = t2w or t2w_embed
-        self.use_HBV    = False # Not currently used, but could be added similarly to T2W
+        self.use_HBV    = hbv 
         self.data_type  = data_type
         self.blank_prob = blank_prob
         
         self.processing = 'lowfield' if lowfield else 'upsample' if upsample else 'offset' if t2w_offset else None
-        self.img_dict   = pd.read_csv(f'/cluster/project7/ProsRegNet_CellCount/Dataset_preparation/CSV/{root}_{self.processing}{self.masked}_{data_type}.csv')
+        csv_name = f'{self.processing}_HBV_{data_type}' if hbv else f'{root}_{self.processing}{self.masked}_{data_type}'
+        self.img_dict   = pd.read_csv(f'/cluster/project7/ProsRegNet_CellCount/Dataset_preparation/CSV/{csv_name}.csv')
         self.transforms = get_transforms(2, image_size, downsample, type=self.processing)
             
-        print('\n', data_type)
-        for i in self.transforms:
-            print(i, self.transforms[i])
+        # print('\n', data_type)
+        # for i in self.transforms:
+        #     print(i, self.transforms[i])
             
         if self.t2w_embed:
             # Load pre-trained T2W embedding model
@@ -85,7 +87,7 @@ class MyDataset(Dataset):
             # sample['HBV_input'] = self.transforms['HBV'](t2w)
             if self.processing == 'lowfield':
                 hbv = Image.open(f'{self.img_path}/HBV_lowfield/{item["SID"]}').convert('L')                
-            sample['HBV_condition'] = self.transforms['HBV'](hbv)
+            sample['HBV'] = self.transforms['HBV'](hbv)
         
         img = Image.open(f'{self.img_path}/ADC{self.masked}/{item["SID"]}').convert('L')
         sample['ADC_input'] = self.transforms['ADC_input'](img)

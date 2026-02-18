@@ -109,52 +109,63 @@ class UNet_MultiTask(nn.Module):
         cross_decoder:   bool = True,
         cross_middle:    bool = True,
         gate_init:       float = 0.0,
+        cross_attention: bool = True
     ):
         super().__init__()
         self.adc = unet_adc
         self.t2w = unet_t2w
-
+        self.cross_attention = cross_attention
+        
         # Make it compatible with your Diffusion wrapper assumptions
         self.input_img_channels = 1
         self.mask_channels      = 1
         self.self_condition     = getattr(unet_adc, "self_condition", False) or getattr(unet_t2w, "self_condition", False)
         self.controlnet         = None
-        self.use_T2W         = False
+        self.use_T2W            = False
+        self.use_HBV            = getattr(unet_adc, "use_HBV", False) or getattr(unet_t2w, "use_HBV", False)
 
         # Cross-attn modules: one per block index (encoder + decoder), plus optional middle.
-        self.cross_encoder = cross_encoder
-        self.cross_decoder = cross_decoder
-        self.cross_middle  = cross_middle
+        self.cross_encoder = cross_encoder and cross_attention
+        self.cross_decoder = cross_decoder and cross_attention
+        self.cross_middle  = cross_middle  and cross_attention
 
         # Encoder blocks count must match for lockstep stepping
         assert len(self.adc.input_blocks)  == len(self.t2w.input_blocks),  "ADC and T2W UNets must have same number of input_blocks"
         assert len(self.adc.output_blocks) == len(self.t2w.output_blocks), "ADC and T2W UNets must have same number of output_blocks"
 
-        ## Attention modules are bidirectional, but we use separate modules so each direction can learn independently
-        # Encoder cross-attn modules
-        self.xattn_enc_adc = nn.ModuleList([
-            _CrossAttnResidual2D(num_heads=num_heads, gate_init=gate_init) for _ in range(len(self.adc.input_blocks))
-        ])
-        self.xattn_enc_t2w = nn.ModuleList([
-            _CrossAttnResidual2D(num_heads=num_heads, gate_init=gate_init) for _ in range(len(self.t2w.input_blocks))
-        ])
-        
-        # Mid cross-attn modules
-        self.xattn_mid_adc = _CrossAttnResidual2D(num_heads=num_heads, gate_init=gate_init)
-        self.xattn_mid_t2w = _CrossAttnResidual2D(num_heads=num_heads, gate_init=gate_init)
-        
-        # Decoder cross-attn modules
-        self.xattn_dec_adc = nn.ModuleList([
-            _CrossAttnResidual2D(num_heads=num_heads, gate_init=gate_init) for _ in range(len(self.adc.output_blocks))
-        ])
-        self.xattn_dec_t2w = nn.ModuleList([
-            _CrossAttnResidual2D(num_heads=num_heads, gate_init=gate_init) for _ in range(len(self.t2w.output_blocks))
-        ])
+        if self.cross_attention:
+            ## Attention modules are bidirectional, but we use separate modules so each direction can learn independently
+            # Encoder
+            self.xattn_enc_adc = nn.ModuleList([
+                _CrossAttnResidual2D(num_heads=num_heads, gate_init=gate_init) for _ in range(len(self.adc.input_blocks))
+            ])
+            self.xattn_enc_t2w = nn.ModuleList([
+                _CrossAttnResidual2D(num_heads=num_heads, gate_init=gate_init) for _ in range(len(self.t2w.input_blocks))
+            ])
+            
+            # Middle
+            self.xattn_mid_adc = _CrossAttnResidual2D(num_heads=num_heads, gate_init=gate_init)
+            self.xattn_mid_t2w = _CrossAttnResidual2D(num_heads=num_heads, gate_init=gate_init)
+            
+            # Decoder 
+            self.xattn_dec_adc = nn.ModuleList([
+                _CrossAttnResidual2D(num_heads=num_heads, gate_init=gate_init) for _ in range(len(self.adc.output_blocks))
+            ])
+            self.xattn_dec_t2w = nn.ModuleList([
+                _CrossAttnResidual2D(num_heads=num_heads, gate_init=gate_init) for _ in range(len(self.t2w.output_blocks))
+            ])
+        else:
+            self.xattn_enc_adc = None
+            self.xattn_enc_t2w = None
+            self.xattn_mid_adc = None
+            self.xattn_mid_t2w = None
+            self.xattn_dec_adc = None
+            self.xattn_dec_t2w = None
         
 
     def forward(
         self, x_adc, cond_adc, x_t2w, cond_t2w, timesteps, *, 
-        x_self_cond_adc=None, x_self_cond_t2w=None, control=None
+        x_self_cond_adc=None, x_self_cond_t2w=None, hbv=None, control=None
     ):
         """
         x_adc, x_t2w: noisy inputs for each task [B, 1, H, W]
@@ -174,8 +185,17 @@ class UNet_MultiTask(nn.Module):
             x_self_cond_t2w = default(x_self_cond_t2w, lambda: torch.zeros_like(x_t2w))
             x_t2w = torch.cat([x_t2w, x_self_cond_t2w], dim=1)
               
+        # Concatenate modality inputs; include HBV when the underlying unet expects it
         h_adc = torch.cat([x_adc, cond_adc], dim=1).type(self.adc.dtype)
         h_t2w = torch.cat([x_t2w, cond_t2w], dim=1).type(self.t2w.dtype)
+
+        if getattr(self.adc, "use_HBV", False):
+            assert hbv is not None, "use_HBV=True but no HBV provided"
+            h_adc = torch.cat([h_adc, hbv.type(self.adc.dtype)], dim=1)
+
+        if getattr(self.t2w, "use_HBV", False):
+            assert hbv is not None, "use_HBV=True but no HBV provided"
+            h_t2w = torch.cat([h_t2w, hbv.type(self.t2w.dtype)], dim=1)
 
         hs_adc = []
         hs_t2w = []

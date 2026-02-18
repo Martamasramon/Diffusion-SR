@@ -37,7 +37,7 @@ def get_img_size(args):
 def build_UNet(args, img_channels=1):
     img_size = get_img_size(args)
     
-    if args.unet_type == 'latent':
+    if args.unet_type == 'latent' or args.unet_type=='disc_diff':
         args.self_condition = False
         
     if args.unet_type == 'basic':
@@ -45,6 +45,7 @@ def build_UNet(args, img_channels=1):
         return UNet_Basic_DiscDiff(
             image_size      = img_size,
             use_T2W         = args.use_T2W,
+            use_HBV         = args.use_HBV,
             self_condition  = args.self_condition,
         )
     elif args.unet_type == 'basic_old' or args.unet_type == 'latent':
@@ -68,10 +69,11 @@ def build_UNet(args, img_channels=1):
     )
     elif args.unet_type == 'disc_diff':
         print('Building Disc-Diff UNet model...')
-        assert args.use_T2W is True
+        assert (args.use_T2W is True or args.use_HBV is True)
         return UNet_DisC_Diff(
             image_size      = img_size,
             use_T2W         = args.use_T2W,
+            use_HBV         = args.use_HBV,
             self_condition  = args.self_condition,
         )
     elif args.unet_type == 'multitask':
@@ -81,13 +83,16 @@ def build_UNet(args, img_channels=1):
             UNet_Basic_DiscDiff(
                 image_size      = img_size, 
                 self_condition  = args.self_condition,
+                use_HBV         = args.use_HBV,
                 use_checkpoint  = True
             ),
             UNet_Basic_DiscDiff(
                 image_size      = img_size, 
                 self_condition  = args.self_condition,
+                use_HBV         = args.use_HBV,
                 use_checkpoint  = True
             ),
+            cross_attention = args.cross_attention,
         )  
     else:
         raise ValueError(f"Unknown UNet type: {type}")
@@ -107,7 +112,8 @@ def build_diffusion(args, model, auto_normalize=True):
             loss_weights        = {'mse':1, 'ssim':0, 'perct':args.perct_λ},
             loss_weights_t2w    = {'mse':1, 'ssim':0, 'perct':args.perct_λ},
             auto_normalize      = auto_normalize,
-            objective           = args.objective
+            objective           = args.objective,
+            noise_rho           = args.noise_rho,
         )
     else:
         print('Building Diffusion model...')
@@ -145,22 +151,22 @@ def remap_checkpoints(state, target_model):
 def load_model(args, model, diffusion, device):
     print('\nLoading checkpoint...')
     checkpoint = torch.load(args.checkpoint, map_location=device)
-    
+
     if args.controlnet:
         load_pretrained_with_controlnet(diffusion, checkpoint)
     else:
-        missing, unexpected = diffusion.load_state_dict(remap_checkpoints(checkpoint['model'], model), strict=False)
-    # print("Missing keys (first 20):",    missing[:20])
-    # print("Unexpected keys (first 20):", unexpected[:20])
-    
-    # Move model to device
+        # checkpoint['model'] contains the UNet/model state_dict saved during training.
+        model_state = remap_checkpoints(checkpoint['model'], model)
+        missing, unexpected = model.load_state_dict(model_state, strict=False)
+
+    # Move model to device and attach to diffusion
     model.eval()
     model.to(device)
     diffusion.model = model
     diffusion.to(device)
     
 def load_data(args, data_type='train'):
-    print('Loading data...')
+    print(f'Loading data ({data_type})...')
     dataset     = MyDataset(
         folder, 
         data_type       = data_type, 
@@ -170,6 +176,7 @@ def load_data(args, data_type='train'):
         downsample      = args.down,
         t2w             = args.controlnet | args.use_T2W,
         t2w_offset      = args.t2w_offset, 
+        hbv             = args.use_HBV,
         upsample        = args.upsample,
         lowfield        = args.lowfield,
         blank_prob      = args.blank_prob,
@@ -194,7 +201,6 @@ def build_trainer(args,diffusion,train_dataloader,test_dataloader,accelerator,ru
             train_dataloader,
             test_dataloader,
             accelerator,
-            use_T2W             = (args.controlnet or args.use_T2W),
             batch_size          = args.batch_size ,
             lr                  = args.lr,
             train_num_steps     = args.n_epochs,
@@ -207,7 +213,9 @@ def build_trainer(args,diffusion,train_dataloader,test_dataloader,accelerator,ru
             save_best_and_latest_only = True,
             wandb_run           = run,
             vae                 = vae,
-            image_loss_weights  = image_loss_weights
+            image_loss_weights  = image_loss_weights,
+            modality_dropout_p_adc = args.modality_drop_prob,
+            modality_dropout_p_t2w = args.modality_drop_prob,
         )
     else: 
         return Trainer(
@@ -215,7 +223,6 @@ def build_trainer(args,diffusion,train_dataloader,test_dataloader,accelerator,ru
             train_dataloader,
             test_dataloader,
             accelerator,
-            use_T2W             = (args.controlnet or args.use_T2W),
             finetune_controlnet = args.controlnet,
             batch_size          = args.batch_size,
             lr                  = args.lr,
