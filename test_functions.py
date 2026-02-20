@@ -15,7 +15,7 @@ from scipy.stats import spearmanr
 import sys
 sys.path.append('../models')
 from models.network_utils import *
-from VAE import encode_latent, decode_latent
+from models.VAE import encode_latent, decode_latent
 
 
 def compute_metrics(pred, gt):
