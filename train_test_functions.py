@@ -148,6 +148,11 @@ def remap_checkpoints(state, target_model):
     else: 
         return state
 
+def strip_prefix(state_dict, prefix="model."):
+    if not any(k.startswith(prefix) for k in state_dict.keys()):
+        return state_dict
+    return {k[len(prefix):]: v for k, v in state_dict.items() if k.startswith(prefix)}
+
 def load_model(args, model, diffusion, device):
     print('\nLoading checkpoint...')
     checkpoint = torch.load(args.checkpoint, map_location=device)
@@ -155,9 +160,20 @@ def load_model(args, model, diffusion, device):
     if args.controlnet:
         load_pretrained_with_controlnet(diffusion, checkpoint)
     else:
-        model_state = remap_checkpoints(checkpoint['model'], model)
-        missing, unexpected = diffusion.load_state_dict(model_state, strict=False)
+        state = checkpoint['model']
 
+        if args.unet_type == 'multitask':
+            state = strip_prefix(state, "model.")
+        else:
+            state = remap_checkpoints(state, model)  # keep if you still need old->new key remaps
+
+        missing, unexpected = model.load_state_dict(state, strict=False)
+        print(f"Loaded into UNet. missing={len(missing)} unexpected={len(unexpected)}")
+        print('Unexpected keys sample:', unexpected[:5])
+        
+
+    model.to(device).eval()
+    diffusion.model = model
     diffusion.to(device).eval()
     
 def load_data(args, data_type='train'):
