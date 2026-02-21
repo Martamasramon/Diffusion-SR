@@ -94,25 +94,37 @@ def run_diffusion(diffusion, model_input, unet_type, controlnet=False, perform_u
             
     return pred
 
-def get_target_prediction(batch, model_output, vae=None):
+def get_target_prediction(batch, model_output, device, vae=None, unet_type=None):
     """
     Determine which target to use for evaluation and whether to transform the model output.
-    - If 'ADC_target' exists: use it as target and downsample model_output to match.
-    - Else: evaluate against 'ADC_input' directly.
+    Returns both ADC and T2W targets/predictions if available.
+    - ADC: If 'ADC_target' exists use it, else use 'ADC_input'.
+    - T2W: If 'T2W_input' exists in batch, return it; otherwise None.
     """
+    # ADC target and prediction
     if 'ADC_target' in batch.keys():
         # Build transform to match target resolution / shape
-        pred_transform  = downsample_transform(batch['ADC_target'].shape[1])
-        target     = batch['ADC_target']
-        prediction = pred_transform(model_output)
+        adc_target     = batch['ADC_target'].to(device)
+        pred_transform = downsample_transform(batch['ADC_target'].shape[1])
+        adc_prediction = pred_transform(model_output)
     else:
-        target      = batch['ADC_input']
-        prediction  = model_output
+        adc_target     = batch['ADC_input'].to(device)
+        adc_prediction = model_output
     
     if vae is not None:
-        prediction = decode_latent(prediction, vae)[:,0,:,:]
+        adc_prediction = decode_latent(adc_prediction, vae)[:,0,:,:]
+    
+    if unet_type == 'multitask':
+        t2w_target     = batch['T2W_input'].to(device)
+        t2w_prediction = model_output[1]
+        adc_prediction = model_output[0]
+
+        if vae is not None:
+            t2w_prediction = decode_latent(t2w_prediction, vae)[:,0,:,:]
+    else:
+        t2w_target, t2w_prediction = None, None
         
-    return target, prediction
+    return adc_target, adc_prediction, t2w_target, t2w_prediction
 
 def get_batch_images(dataloader, device, use_T2W, use_HBV, vae=None, batch=None):
     """
@@ -197,25 +209,33 @@ def log_metrics_to_csv(args, mse, psnr,ssim,csv_path='/cluster/project7/ProsRegN
 def evaluate_results(args, diffusion, dataloader, device, vae=None):
     """
     Iterate over dataloader and compute average MSE/PSNR/SSIM over all samples.
+    For multitask UNet, calculate metrics for both ADC and T2W outputs.
     """
     mse_list, psnr_list, ssim_list = [], [], []
     
+    if args.unet_type == 'multitask':
+        t2w_mse_list, t2w_psnr_list, t2w_ssim_list = [], [], []
+    
     for batch in dataloader:
         # Base conditioning input, Optional T2W for the diffusion model
-        _, lowres, t2w_input, _ = get_batch_images(dataloader, device, args.use_T2W, args.use_HBV, vae, batch)
+        model_input, _, batch = get_batch_images(dataloader, device, args.use_T2W, args.use_HBV, vae, batch)
 
         # Sample SR output
-        model_output  = run_diffusion(diffusion, lowres, t2w_input, args.unet_type, args.controlnet)
-                    
-        # Align prediction/target if necessary
-        target, prediction = get_target_prediction(batch, model_output, vae)
-        target = target.to(device)
-
-        # Accumulate per-image metrics
+        model_output = run_diffusion(diffusion, model_input, args.unet_type, args.controlnet)
+            
+        # Evaluate ADC output
+        adc_target, adc_prediction, t2w_target, t2w_prediction = get_target_prediction(batch, model_output, device, vae, args.unet_type)
         mse_list, psnr_list, ssim_list = add_batch_metrics_to_list(
-            prediction, target, mse_list, psnr_list, ssim_list
+            adc_prediction, adc_target, mse_list, psnr_list, ssim_list
         )
         
+        if args.unet_type == 'multitask':
+            # Evaluate T2W output
+            t2w_mse_list, t2w_psnr_list, t2w_ssim_list = add_batch_metrics_to_list(
+                t2w_prediction, t2w_target, t2w_mse_list, t2w_psnr_list, t2w_ssim_list
+            )
+        
+    # Calculate averages
     mse  = np.mean(mse_list)
     psnr = np.mean(psnr_list)
     ssim = np.mean(ssim_list)  
@@ -223,6 +243,16 @@ def evaluate_results(args, diffusion, dataloader, device, vae=None):
     print(f'Average MSE:  {mse:.6f}')
     print(f'Average PSNR: {psnr:.2f}')
     print(f'Average SSIM: {ssim:.4f}')
+    
+    if args.unet_type == 'multitask':
+        t2w_mse  = np.mean(t2w_mse_list)
+        t2w_psnr = np.mean(t2w_psnr_list)
+        t2w_ssim = np.mean(t2w_ssim_list)
+        
+        print(f'\nT2W Output:')
+        print(f'Average MSE:  {t2w_mse:.6f}')
+        print(f'Average PSNR: {t2w_psnr:.2f}')
+        print(f'Average SSIM: {t2w_ssim:.4f}')
     
     log_metrics_to_csv(args, mse, psnr, ssim)
 
