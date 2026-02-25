@@ -8,7 +8,7 @@ from utils.misc_utils import resample_to_reference
 
 class PicaiDataset(Dataset):
 
-    def __init__(self, metadata_X_df, img_dir, labels=None, target_size=(224, 224), transform=None):
+    def __init__(self, metadata_X_df, img_dir, labels=None, target_size=(224, 224)):
         self.metadata_X_df = metadata_X_df
         self.img_dir   =  '/cluster/project7/backup_masramon/PI-CAI/'
         self.label_dir =  '/cluster/project7/backup_masramon/PI-CAI_annotations/lesion_human_original/'
