@@ -67,6 +67,9 @@ class MyDataset(Dataset):
         item   = self.img_dict.iloc[idx]
         sample = {}
         
+        if self.data_type == 'val':
+            sample['SID'] = item['SID']
+        
         if self.use_T2W:
             # t2w = Image.new('L', t2w.size, 0) # Test performance with blank image
             t2w = Image.open(f'{self.img_path}/T2W{self.masked}/{item["SID"]}').convert('L')
