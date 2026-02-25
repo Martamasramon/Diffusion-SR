@@ -21,6 +21,7 @@ class UNet_Basic(nn.Module):
         with_time_emb:  bool  = True,
         controlnet:     bool  = False,
         use_T2W:        bool  = False,
+        use_HBV:        bool  = False,
         img_channels:   int   = 1,
     ):
         super().__init__()
@@ -31,7 +32,8 @@ class UNet_Basic(nn.Module):
         self.self_condition = bool(self_condition)
         self.with_time_emb  = bool(with_time_emb)
         self.use_T2W        = bool(use_T2W)
-
+        self.use_HBV        = bool(use_HBV)
+        
         # Ensure modules can access channels
         self.input_img_channels = img_channels
         self.mask_channels      = img_channels

@@ -273,11 +273,20 @@ class Trainer(object):
                 
                 if 'T2W_embed' in data:
                     t2w_embed = sample_t2w_embed[start:end]
-                    images    = self.ema.ema_model.sample(batch_size=low_res.shape[0], low_res=low_res, t2w=t2w_embed, hbv=hbv)
+                    images    = self.ema.ema_model.sample(
+                        batch_size=low_res.shape[0], 
+                        low_res=low_res, 
+                        t2w=t2w_embed, 
+                        hbv=hbv)
                 else:
                     control = t2w if self.model.controlnet else None
                     t2w_in  = t2w if (self.model.use_T2W and self.model.controlnet is None) else None
-                    images  = self.ema.ema_model.sample(batch_size=low_res.shape[0], low_res=low_res, control=control, t2w=t2w_in, hbv=hbv)
+                    images  = self.ema.ema_model.sample(
+                        batch_size=low_res.shape[0], 
+                        low_res=low_res, 
+                        control=control, 
+                        t2w=t2w_in, 
+                        hbv=hbv)
                     
                 all_images_list.append(images)
                 start = end
