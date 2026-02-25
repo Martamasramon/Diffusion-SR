@@ -11,6 +11,7 @@ from skimage.metrics import mean_squared_error      as mse_metric
 from transforms import downsample_transform
 from PIL import Image
 from scipy.stats import spearmanr
+from tqdm import tqdm
 
 import sys
 sys.path.append('../models')
@@ -89,9 +90,8 @@ def run_diffusion(diffusion, model_input, unet_type, controlnet=False, perform_u
     with torch.no_grad():
         pred = diffusion.sample(model_input['lowres'], **kwargs)
 
-    if unet_type == 'multitask':
-        pred = pred[0]
-            
+    if unet_type != 'multitask':
+        return pred, None            
     return pred
 
 def get_target_prediction(batch, model_output, device, vae=None, unet_type=None):
@@ -102,14 +102,14 @@ def get_target_prediction(batch, model_output, device, vae=None, unet_type=None)
     - T2W: If 'T2W_input' exists in batch, return it; otherwise None.
     """
     # ADC target and prediction
+    adc_prediction = model_output[0]
     if 'ADC_target' in batch.keys():
         # Build transform to match target resolution / shape
         adc_target     = batch['ADC_target'].to(device)
         pred_transform = downsample_transform(batch['ADC_target'].shape[1])
-        adc_prediction = pred_transform(model_output)
+        adc_prediction = pred_transform(adc_prediction)
     else:
         adc_target     = batch['ADC_input'].to(device)
-        adc_prediction = model_output
     
     if vae is not None:
         adc_prediction = decode_latent(adc_prediction, vae)[:,0,:,:]
@@ -117,7 +117,6 @@ def get_target_prediction(batch, model_output, device, vae=None, unet_type=None)
     if unet_type == 'multitask':
         t2w_target     = batch['T2W_input'].to(device)
         t2w_prediction = model_output[1]
-        adc_prediction = model_output[0]
 
         if vae is not None:
             t2w_prediction = decode_latent(t2w_prediction, vae)[:,0,:,:]
@@ -212,49 +211,56 @@ def evaluate_results(args, diffusion, dataloader, device, vae=None):
     For multitask UNet, calculate metrics for both ADC and T2W outputs.
     """
     mse_list, psnr_list, ssim_list = [], [], []
-    
+
     if args.unet_type == 'multitask':
         t2w_mse_list, t2w_psnr_list, t2w_ssim_list = [], [], []
     
-    for batch in dataloader:
-        # Base conditioning input, Optional T2W for the diffusion model
+    for batch in tqdm(dataloader, total=len(dataloader)):
         model_input, _, batch = get_batch_images(dataloader, device, args.use_T2W, args.use_HBV, vae, batch)
+        model_output          = run_diffusion(diffusion, model_input, args.unet_type, args.controlnet)
 
-        # Sample SR output
-        model_output = run_diffusion(diffusion, model_input, args.unet_type, args.controlnet)
-            
-        # Evaluate ADC output
         adc_target, adc_prediction, t2w_target, t2w_prediction = get_target_prediction(batch, model_output, device, vae, args.unet_type)
-        mse_list, psnr_list, ssim_list = add_batch_metrics_to_list(
-            adc_prediction, adc_target, mse_list, psnr_list, ssim_list
-        )
+            
+        if args.save_results:
+            # Save predicted and target images for qualitative analysis
+            save_dir = os.path.join('/cluster/project7/backup_masramon/IQT/PICAI/')
+            os.makedirs(save_dir, exist_ok=True)
+            for j in range(adc_prediction.size(0)):
+                name = batch['SID'][j] 
+                pred_img = Image.fromarray((format_image(adc_prediction[j]) * 255).astype(np.uint8))
+                pred_img.save(os.path.join(save_dir, 'ADC_pred', f'{name}'))
+                
+                if args.unet_type == 'multitask':
+                    pred_t2w_img = Image.fromarray((format_image(t2w_prediction[j]) * 255).astype(np.uint8))
+                    pred_t2w_img.save(os.path.join(save_dir, 'T2W_pred', f'{name}'))
+        
+        else:
+            mse_list, psnr_list, ssim_list = add_batch_metrics_to_list(adc_prediction, adc_target, mse_list, psnr_list, ssim_list)
+            
+            if args.unet_type == 'multitask':
+                t2w_mse_list, t2w_psnr_list, t2w_ssim_list = add_batch_metrics_to_list(t2w_prediction, t2w_target, t2w_mse_list, t2w_psnr_list, t2w_ssim_list)
+        
+    if not args.save_results:
+        # Calculate averages
+        mse  = np.mean(mse_list)
+        psnr = np.mean(psnr_list)
+        ssim = np.mean(ssim_list)  
+        
+        print(f'Average MSE:  {mse:.6f}')
+        print(f'Average PSNR: {psnr:.2f}')
+        print(f'Average SSIM: {ssim:.4f}')
         
         if args.unet_type == 'multitask':
-            # Evaluate T2W output
-            t2w_mse_list, t2w_psnr_list, t2w_ssim_list = add_batch_metrics_to_list(
-                t2w_prediction, t2w_target, t2w_mse_list, t2w_psnr_list, t2w_ssim_list
-            )
+            t2w_mse  = np.mean(t2w_mse_list)
+            t2w_psnr = np.mean(t2w_psnr_list)
+            t2w_ssim = np.mean(t2w_ssim_list)
+            
+            print(f'\nT2W Output:')
+            print(f'Average MSE:  {t2w_mse:.6f}')
+            print(f'Average PSNR: {t2w_psnr:.2f}')
+            print(f'Average SSIM: {t2w_ssim:.4f}')
         
-    # Calculate averages
-    mse  = np.mean(mse_list)
-    psnr = np.mean(psnr_list)
-    ssim = np.mean(ssim_list)  
-    
-    print(f'Average MSE:  {mse:.6f}')
-    print(f'Average PSNR: {psnr:.2f}')
-    print(f'Average SSIM: {ssim:.4f}')
-    
-    if args.unet_type == 'multitask':
-        t2w_mse  = np.mean(t2w_mse_list)
-        t2w_psnr = np.mean(t2w_psnr_list)
-        t2w_ssim = np.mean(t2w_ssim_list)
-        
-        print(f'\nT2W Output:')
-        print(f'Average MSE:  {t2w_mse:.6f}')
-        print(f'Average PSNR: {t2w_psnr:.2f}')
-        print(f'Average SSIM: {t2w_ssim:.4f}')
-    
-    log_metrics_to_csv(args, mse, psnr, ssim)
+        log_metrics_to_csv(args, mse, psnr, ssim)
 
 def uq_calibration(x0_samples, highres):
     '''
@@ -348,8 +354,8 @@ def plot_uq_error_corr(pred, highres, pred_std, fig, axes, i=None, j=None):
     bin_centers = []
     bin_error_median = []
 
-    for i in range(n_bins):
-        mask = (pred_std_flat >= quantiles[i]) & (pred_std_flat < quantiles[i + 1])
+    for b in range(n_bins):
+        mask = (pred_std_flat >= quantiles[b]) & (pred_std_flat < quantiles[b + 1])
         if np.any(mask):
             bin_centers.append(pred_std_flat[mask].mean())
             bin_error_median.append(np.median(err_flat[mask]))
@@ -395,7 +401,7 @@ def plot_uq_t2w_overlay(t2w_img, pred_std, fig, axes, i, j, colorbar=True):
     axes[i, j].axis('off')
 
 
-def create_plot(batch_size, use_T2W, use_HBV, num_rep=None, offset=False, add_error=False, avg_std=False, uq_t2w_overlay=False):
+def create_plot(batch_size, use_T2W, use_HBV, multi_task=None, num_rep=None, offset=False, add_error=False, avg_std=False, uq_t2w_overlay=False):
     """
     Create a figure grid and set titles for the first row.
     Supports three modes:
@@ -403,33 +409,36 @@ def create_plot(batch_size, use_T2W, use_HBV, num_rep=None, offset=False, add_er
       2) num_rep set + offset=False: multiple SR samples for same input (optionally with T2W)
       3) num_rep set + offset=True: multiple pairs (T2W, SR) for per-rep T2W sampling
     """
-    titles = ["Low res (Input)"]
+    titles = ["LR ADC (Input)"]
 
     if use_HBV:
-        titles += ["HBV (Input)"]
+        titles += ["LR HBV (Input)"]
     
     if num_rep is None: # Single SR output case
         if use_T2W:
-            titles += ["High res T2W (Input)"]
-        titles += ["High res (SR Output)"]
+            titles += ["LR T2W (Input)"]
+        titles += ["Output ADC"]
         if add_error:
             titles += ["Error"]
-        titles += ["High res (Ground truth)"]
+        titles += ["HR ADC (Ground truth)"]
+        if multi_task:
+            titles += ["T2W Output"]
+            titles += ["HR T2W (Ground truth)"]
 
     else: # Variability / multiple samples case
         if offset: # Each rep has a (T2W, SR) pair
             for r in range(num_rep):
-                titles += ["High res T2W", f"Super resolution ({r+1})"]
+                titles += ["HR T2W", f"Super resolution ({r+1})"]
         else: # One T2W input, multiple SR outputs
             if use_T2W:
-                titles += ["High res T2W (Input)"]
+                titles += ["HR T2W (Input)"]
             titles += [f"Super resolution ({r+1})" for r in range(num_rep)]
 
         # Optional mean/std summary columns
         if avg_std:
             titles += ["Average Output", "Std Output"]
 
-        titles += ["High res (Ground truth)"]
+        titles += ["HR (Ground truth)"]
 
         if uq_t2w_overlay:
             titles += ["T2W with Uncertainty Overlay"]
@@ -488,14 +497,14 @@ def visualize_batch(
     model_input, model_images, batch = get_batch_images(dataloader, device, args.use_T2W, args.use_HBV, vae)
     
     # Run model sampling
-    pred = run_diffusion(diffusion, model_input, args.unet_type, args.controlnet, args.perform_uq, args.num_repeats)
+    pred_adc, pred_t2w = run_diffusion(diffusion, model_input, args.unet_type, args.controlnet, args.perform_uq, args.num_repeats)
     
     # Uncertainty quantification
     if args.perform_uq:
-        decoded_x0, pred_mean, pred_std = decode_all_UQ(pred, vae)
+        decoded_x0, pred_mean, pred_std = decode_all_UQ(pred_adc, vae)
     elif vae is not None:
         print("Decoding VAE latent space for visualization...")
-        pred = decode_latent(pred, vae)[:,0,:,:]
+        pred_adc = decode_latent(pred_adc, vae)[:,0,:,:]
     
     for i in range(args.batch_size):
         count = 0
@@ -517,13 +526,21 @@ def visualize_batch(
                     plot_image(model_images['t2w_lowres'][i], fig, axes, i, count)
                     
             # Column 2: High res (SR Output)
-            plot_image(pred[i], fig, axes, i, count+1)
+            count += 1
+            plot_image(pred_adc[i], fig, axes, i, count)
             
             # Column 3 (optional): Error
             if add_error:
-                plot_image(pred[i], fig, axes, i, count+2, False)
-                plot_error(pred[i], model_images['highres'][i], fig, axes, i, count+2)
-                count += 2
+                count += 1
+                plot_image(pred_adc[i], fig, axes, i, count, False)
+                plot_error(pred_adc[i], model_images['highres'][i], fig, axes, i, count)
+                
+            
+            if args.unet_type == 'multi_task':
+                count += 1
+                plot_image(pred_t2w[i], fig, axes, i, count)
+                count += 1
+                plot_error(pred_adc[i], model_images['t2w_highres'][i], fig, axes, i, count)
                 
         else:
             if args.use_T2W:
