@@ -16,27 +16,31 @@ def main():
     load_model(args, model, diffusion, device)
     
     dataloader = load_data(args, 'val')
-
-    print('Visualising...')
-    save_name = args.save_name if args.save_name is not None else os.path.basename(os.path.dirname(args.checkpoint))
-    test_data = 'HistoMRI' if args.finetune else 'PICAI'
     
-    visualize_batch(
-        args,
-        diffusion, 
-        dataloader, 
-        device, 
-        output_name = f'{save_name}_{test_data}'
-    )
+    if args.visualise:
+        print('Visualising...')
+        save_name = args.save_name if args.save_name is not None else os.path.basename(os.path.dirname(args.checkpoint))
+        test_data = 'HistoMRI' if args.finetune else 'PICAI'
+        
+        visualize_batch(
+            args,
+            diffusion, 
+            dataloader, 
+            device, 
+            output_name = f'{save_name}_{test_data}'
+        )
     
-    print('Evaluating...')
-    evaluate_results(
-        args, 
-        diffusion, 
-        dataloader, 
-        device, 
-    )
-    
+    if args.evaluate:
+        print('Evaluating...')
+        evaluate_results(
+            args, 
+            diffusion, 
+            dataloader, 
+            device, 
+        )
+        
+    print('Done!')
+        
 
 if __name__ == '__main__':
     print('Parameters:')
