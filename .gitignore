@@ -17,3 +17,4 @@ cache_prostate158/
 downstream_tasks/csPCa_classification/data/
 downstream_tasks/csPCa_classification/outputs/
 downstream_tasks/csPCa_classification/*.ipynb
+downstream_tasks/csPCa_classification/utils/transformations.py

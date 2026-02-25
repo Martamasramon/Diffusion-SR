@@ -2,17 +2,17 @@ import os
 import torch
 import numpy as np
 import SimpleITK as sitk
-import nibabel as nib
 from torch.utils.data import Dataset
-import torch.nn.functional as F
+import torchvision.transforms.functional as TF
 from utils.misc_utils import resample_to_reference
 
 class PicaiDataset(Dataset):
 
-    def __init__(self, metadata_X_df, labels=None, target_size=(224, 224)):
+    def __init__(self, metadata_X_df, img_dir, labels=None, target_size=(224, 224), transform=None):
         self.metadata_X_df = metadata_X_df
         self.img_dir   =  '/cluster/project7/backup_masramon/PI-CAI/'
         self.label_dir =  '/cluster/project7/backup_masramon/PI-CAI_annotations/lesion_human_original/'
+        # self.img_dir = img_dir
         self.labels = labels
         self.target_size = target_size
 
@@ -31,6 +31,11 @@ class PicaiDataset(Dataset):
         adc_img_path = f"{self.img_dir}/{patient_id}/{image_name}_adc.mha"
         lesion_mask_path = f"{self.label_dir}/{image_name}.nii.gz"
 
+        # t2w_img_path = f"{self.img_dir}/picai_public_images/{patient_id}/{image_name}_t2w.mha"
+        # hbv_img_path = f"{self.img_dir}/picai_public_images/{patient_id}/{image_name}_hbv.mha"
+        # adc_img_path = f"{self.img_dir}/picai_public_images/{patient_id}/{image_name}_adc.mha"
+        # lesion_mask_path = f"{self.img_dir}/lesion_masks/{image_name}.nii.gz"
+
         # Load images and lesion mask using SimpleITK
         t2w_img = sitk.ReadImage(t2w_img_path)
         hbv_img = sitk.ReadImage(hbv_img_path)
@@ -43,13 +48,10 @@ class PicaiDataset(Dataset):
 
         # Extract the slice with the largest lesion area
         lesion_mask_array = sitk.GetArrayFromImage(lesion_mask)
-        # slice_areas = np.sum(lesion_mask_array > 0, axis=(1,2))
         slice_areas = lesion_mask_array.sum(axis=(1,2))
         largest_lesion_slice = np.argmax(slice_areas)
         if slice_areas.sum() == 0:
-            largest_lesion_slice = lesion_mask_array.shape[0] // 2 # If no lesion, take the middle slice
-            # print("No lesion found in mask, defaulting to middle slice for image:", image_name)
-            
+            largest_lesion_slice = lesion_mask_array.shape[0] // 2 # If no lesion, take the middle slice            
 
         # Extract the corresponding slices from T2W, HBV, ADC, and lesion mask
         t2w_slice = sitk.GetArrayFromImage(t2w_img)[largest_lesion_slice, :, :]
@@ -72,18 +74,14 @@ class PicaiDataset(Dataset):
         img = img.unsqueeze(0)
         lesion_mask = lesion_mask.unsqueeze(0)
 
-        # Resize images and lesion mask to target size for network input
-        img = F.interpolate(
-            img, 
-            size=self.target_size, 
-            mode='bilinear', 
-            align_corners=False
+        # Center crop to target size
+        img = TF.center_crop(
+            img,
+            output_size=self.target_size
         )
-
-        lesion_mask = F.interpolate(
+        lesion_mask = TF.center_crop(
             lesion_mask, 
-            size=self.target_size, 
-            mode='nearest'
+            output_size=self.target_size
         )
 
         # Remove batch dimension -> (C, H, W)

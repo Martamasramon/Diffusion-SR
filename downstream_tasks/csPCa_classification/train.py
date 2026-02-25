@@ -12,6 +12,7 @@ from utils.test_validate import val_test_model
 from utils.visualize import plot_training_curves, plot_classification_metrics
 from utils.preprocess_metadata import preprocess_metadata
 from cs_classification_model import MultimodalPICAINet
+from utils.transformations import JointTransform
 
 def set_random_seed(seed):
     np.random.seed(seed) 
@@ -23,18 +24,30 @@ def set_random_seed(seed):
 def train(output_dir, timestamp, debug=False):
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    num_epochs = 30
-    batch_size = 64
-    random_seed = 24
+    num_epochs = 60
+    batch_size = 32
+    random_seed = 13
 
     metadata_csv_path = '/cluster/project7/backup_masramon/picai_marksheet.csv'
-    target_size = (224, 224)
+    # metadata_csv_path = './data/picai_marksheet.csv'
+    target_size = (64, 64)
 
     set_random_seed(random_seed)
 
     print("Preprocessing the metadata...")
     train_metadata_X_df, train_metadata_y, val_metadata_X_df, val_metadata_y, test_metadata_X_df, test_metadata_y = preprocess_metadata(metadata_csv_path, random_state=random_seed)
-    
+
+    # Make the labels balanced by downsampling the majority class in the training set
+    balance_training_data = False
+    if balance_training_data:
+        pos_idx = train_metadata_y[train_metadata_y == 1].index
+        neg_idx = train_metadata_y[train_metadata_y == 0].index
+        neg_sampled_idx = np.random.choice(neg_idx, size=len(pos_idx), replace=False)
+        balanced_idx = np.concatenate([pos_idx, neg_sampled_idx])
+        np.random.shuffle(balanced_idx)
+        train_metadata_X_df = train_metadata_X_df.loc[balanced_idx]
+        train_metadata_y = train_metadata_y.loc[balanced_idx]
+
     if debug:
         print("Debug mode enabled: using smaller dataset and fewer epochs and a smaller batch size")
         batch_size = 4
@@ -44,20 +57,24 @@ def train(output_dir, timestamp, debug=False):
         print(f"Debug Train metadata shape: {train_metadata_X_df.shape}, Debug Val metadata shape: {val_metadata_X_df.shape}, Debug Test metadata shape: {test_metadata_X_df.shape}")
 
     print("Creating Datasets and DataLoaders...")
+    
     train_dataset = PicaiDataset(
         metadata_X_df=train_metadata_X_df,
+        img_dir='./data/',
         labels=train_metadata_y.tolist(),
         target_size=target_size
     )
 
     val_dataset = PicaiDataset(
         metadata_X_df=val_metadata_X_df,
+        img_dir='./data/',
         labels=val_metadata_y.tolist(),
         target_size=target_size
     )
 
     test_dataset = PicaiDataset(
         metadata_X_df=test_metadata_X_df,
+        img_dir='./data/',
         labels=test_metadata_y.tolist(),
         target_size=target_size
     )
@@ -65,52 +82,37 @@ def train(output_dir, timestamp, debug=False):
     train_loader = DataLoader(
         dataset=train_dataset, 
         batch_size=batch_size, 
-        shuffle=True,
-        # num_workers=4
+        shuffle=True
     )
 
     val_loader = DataLoader(
         dataset=val_dataset, 
         batch_size=batch_size, 
-        shuffle=False,
-        # num_workers=4
+        shuffle=False
     )
 
     test_loader = DataLoader(
         dataset=test_dataset, 
         batch_size=batch_size, 
-        shuffle=False,
-        # num_workers=4
+        shuffle=False
     )
     print(f"DataLoaders created with batch size {batch_size}.")
 
     cs_model = MultimodalPICAINet(metadata_input_dim=train_metadata_X_df.shape[1] - 2).to(device)
 
     pos_weight = torch.tensor([ (len(train_metadata_y) - sum(train_metadata_y)) / sum(train_metadata_y) ]).to(device)
-    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-    # criterion = nn.BCEWithLogitsLoss()
+    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight/2)
 
-    # optimizer = torch.optim.AdamW(cs_model.parameters(), lr=learning_rate, weight_decay=0)
-    optimizer = torch.optim.AdamW([
-        {"params": cs_model.backbone.layer3.parameters(), "lr": 1e-5},
-        {"params": cs_model.backbone.layer4.parameters(), "lr": 1e-5},
-        {"params": cs_model.attn_conv.parameters(), "lr": 1e-4},
-        {"params": cs_model.metadata_mlp.parameters(), "lr": 1e-4},
-        {"params": cs_model.multimodal_classifier.parameters(), "lr": 1e-4},
-    ], weight_decay=1e-4)
-
-    # scheduler = None
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=20)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode='max',          # because monitoring AUC
-        factor=0.5,
-        patience=4,
-        min_lr=1e-6
-    )
+    weight_decay = 1e-3
+    optimizer = torch.optim.AdamW(cs_model.parameters(), lr=1e-3, weight_decay=weight_decay)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
 
     print("Model Summary: ")
-    summary(cs_model, input_size=[(1, 3, 224, 224), (1, 1, 224, 224), (1, train_metadata_X_df.shape[1] - 2)], device=device.type)
+    summary(cs_model, input_size=[(1, 3, 64, 64), (1, 1, 64, 64), (1, train_metadata_X_df.shape[1] - 2)], device=device.type)
+
+    for name, param in cs_model.named_parameters():
+        if param.requires_grad:
+            print(name)
 
     print("Starting training...")
 

@@ -75,7 +75,7 @@ def preprocess_metadata(metadata_csv_path, random_state=13):
     sgkf_1 = StratifiedGroupKFold(
         n_splits=5,
         shuffle=True,
-        random_state=13
+        random_state=random_state
     )
     train_val_idx, test_idx = next(
         sgkf_1.split(X=np.zeros(len(metadata['case_csPCa'])),
@@ -89,7 +89,7 @@ def preprocess_metadata(metadata_csv_path, random_state=13):
     sgkf_2 = StratifiedGroupKFold(
         n_splits=10,
         shuffle=True,
-        random_state=13
+        random_state=random_state
     )
 
     train_idx, val_idx = next(
@@ -99,9 +99,6 @@ def preprocess_metadata(metadata_csv_path, random_state=13):
 
     train_metadata = train_val_metadata.iloc[train_idx] 
     val_metadata = train_val_metadata.iloc[val_idx] 
-
-    # train_val_metadata, test_metadata = train_test_split(metadata, test_size=0.2, random_state=random_state, stratify=metadata['case_csPCa'])
-    # train_metadata, val_metadata = train_test_split(train_val_metadata, test_size=0.1, random_state=random_state, stratify=train_val_metadata['case_csPCa'])
 
     # Separate features and labels
     train_metadata_X = train_metadata.drop(columns=['case_csPCa']).reset_index(drop=True)

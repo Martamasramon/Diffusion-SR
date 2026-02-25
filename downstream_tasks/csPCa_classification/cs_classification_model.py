@@ -1,6 +1,5 @@
 import torch
 from torch import nn
-from torchvision import models
 import torch.nn.functional as F
 
 class MultimodalPICAINet(nn.Module):
@@ -9,58 +8,58 @@ class MultimodalPICAINet(nn.Module):
 
         super().__init__()
 
-        backbone = models.resnet50(pretrained=True)
+        self.custom_backbone = nn.Sequential(
+            nn.Conv2d(3, 16, kernel_size=3, padding=1), 
+            nn.LeakyReLU(1e-1),
+            nn.BatchNorm2d(16),
+            nn.MaxPool2d(2), # 32x32
 
-        # for param in backbone.parameters():
-        #     param.requires_grad = False
+            nn.Conv2d(16, 8, kernel_size=3, padding=1),
+            nn.LeakyReLU(1e-1),
+            nn.BatchNorm2d(8),
+            nn.MaxPool2d(2), # 16x16
 
-        for name, param in backbone.named_parameters():
-            if not ("layer3" in name or "layer4" in name):
-                param.requires_grad = False
+            nn.Conv2d(8, 16, kernel_size=3, padding=1),
+            nn.LeakyReLU(1e-1),
+            nn.BatchNorm2d(16)
+        )
 
-        in_features_fc = backbone.fc.in_features
-        backbone.fc = nn.Identity()
+        self.global_avg_pool = nn.AdaptiveAvgPool2d((1, 1))
 
-        self.backbone = backbone
-        self.image_feature_dim = in_features_fc
-
+        self.image_feature_dim = 16 * 1 * 1
+        
         self.attn_conv = nn.Sequential(
             nn.Conv2d(1, 8, kernel_size=3, padding=1),
-            nn.ReLU(),
+            nn.LeakyReLU(1e-1),
             nn.Conv2d(8, 1, kernel_size=1),
             nn.Sigmoid()
         )
 
         self.metadata_mlp = nn.Sequential(
-            nn.Linear(metadata_input_dim, 32),
-            nn.ReLU(),
-            nn.Linear(32, 64),
-            nn.ReLU(),
-            nn.Linear(64, 32),
-            nn.ReLU(),
+            nn.Linear(metadata_input_dim, 8),
+            nn.LeakyReLU(1e-1),
+            nn.Linear(8, 16),
+            nn.LeakyReLU(1e-1),
+            nn.Linear(16, 8),
+            nn.LeakyReLU(1e-1),
             nn.Dropout(0.2)
         )
-        self.metadata_embedding_dim = 32
+        self.metadata_embedding_dim = 8
 
         self.multimodal_dim = self.image_feature_dim + self.metadata_embedding_dim
+
         self.multimodal_classifier = nn.Sequential(
-            nn.Linear(self.multimodal_dim, 128),
-            nn.ReLU(),
+            nn.Linear(self.multimodal_dim, 16),
+            nn.LeakyReLU(1e-1),
             nn.Dropout(0.2),
-            nn.Linear(128, 1),
-            # nn.Sigmoid()
+            nn.Linear(16, 1),
         )
         
     def forward(self, image, lesion_mask, metadata):
 
-        # --- ResNet Stem ---
-        x = self.backbone.conv1(image)
-        x = self.backbone.bn1(x)
-        x = self.backbone.relu(x)
-        x = self.backbone.maxpool(x)
+        # --- Custom Backbone Stem ---
 
-        # --- Layer 1 ---
-        x = self.backbone.layer1(x)
+        x = self.custom_backbone(image)
 
         # Resize mask to match feature map
         mask_resized = F.interpolate(
@@ -75,12 +74,8 @@ class MultimodalPICAINet(nn.Module):
         # Apply attention
         x = x * (1 + attention)
 
-        # Continue backbone
-        x = self.backbone.layer2(x)
-        x = self.backbone.layer3(x)
-        x = self.backbone.layer4(x)
+        x = self.global_avg_pool(x)
 
-        x = self.backbone.avgpool(x)
         image_features = torch.flatten(x, 1)
 
         # Metadata branch
