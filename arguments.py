@@ -63,4 +63,12 @@ parser.set_defaults(finetune      = False)
 parser.set_defaults(controlnet    = False)
 parser.set_defaults(upsample      = False)
 parser.set_defaults(perform_uq    = False)
+
+parser.set_defaults(visualise = True)
+parser.add_argument('--no_visualise', action='store_false', dest='visualise')
+parser.set_defaults(evaluate = True)
+parser.add_argument('--no_evaluate', action='store_false', dest='evaluate')
+parser.set_defaults(save_results = False)
+parser.add_argument('--save_results', action='store_true')
+                    
 args, unparsed = parser.parse_known_args()
