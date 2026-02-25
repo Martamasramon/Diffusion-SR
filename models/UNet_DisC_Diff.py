@@ -330,7 +330,9 @@ class UNet_DisC_Diff(UNet_Basic):
             self.input_blocks_hbv = nn.ModuleList([copy.deepcopy(module) for module in self.input_blocks])
 
         enc_ch = int(self.model_channels * self.channel_mult[-1])
-
+        n_dist = 2 + int(self.use_T2W) + int(self.use_HBV)
+        in_ch  = (enc_ch // 2) * (1 + n_dist)
+        
         self.SE_Attention_com    = SE_Attention(channel=enc_ch//2, reduction=8)
         self.SE_Attention_dist_1 = SE_Attention(channel=enc_ch//2, reduction=8)
         self.SE_Attention_dist_2 = SE_Attention(channel=enc_ch//2, reduction=8)
@@ -338,7 +340,7 @@ class UNet_DisC_Diff(UNet_Basic):
         self.SE_Attention_dist_4 = SE_Attention(channel=enc_ch//2, reduction=8)
 
         self.dim_reduction_non_zeros = nn.Sequential(
-            conv_nd(self.dims , 2 * enc_ch, enc_ch, 1, padding=0),
+            conv_nd(self.dims , in_ch, enc_ch, 1, padding=0),
             nn.SiLU()
         )
 
