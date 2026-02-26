@@ -81,19 +81,25 @@ def train(output_dir, timestamp, debug=False):
     train_loader = DataLoader(
         dataset=train_dataset, 
         batch_size=batch_size, 
-        shuffle=True
+        shuffle=True,
+        num_workers=6,
+        pin_memory=True
     )
 
     val_loader = DataLoader(
         dataset=val_dataset, 
         batch_size=batch_size, 
-        shuffle=False
+        shuffle=False,
+        num_workers=6,
+        pin_memory=True
     )
 
     test_loader = DataLoader(
         dataset=test_dataset, 
         batch_size=batch_size, 
-        shuffle=False
+        shuffle=False,
+        num_workers=6,
+        pin_memory=True
     )
     print(f"DataLoaders created with batch size {batch_size}.")
 

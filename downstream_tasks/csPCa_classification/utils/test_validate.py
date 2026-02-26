@@ -12,10 +12,10 @@ def val_test_model(split_type, model, dataloader, criterion, device):
 
     with torch.no_grad():
         for images, lesion_mask, metadata, labels in tqdm(dataloader, desc=f'{split_type.title()} Evaluation', unit='batch'):
-            images = images.to(device)
-            lesion_mask = lesion_mask.to(device)
-            metadata = metadata.to(device)
-            labels = labels.to(device)
+            images = images.to(device, non_blocking=True)
+            lesion_mask = lesion_mask.to(device, non_blocking=True)
+            metadata = metadata.to(device, non_blocking=True)
+            labels = labels.to(device, non_blocking=True)
 
             val_test_logits = model(images, lesion_mask, metadata)
             loss = criterion(val_test_logits, labels)
