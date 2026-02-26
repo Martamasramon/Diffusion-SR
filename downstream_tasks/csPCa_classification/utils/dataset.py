@@ -7,6 +7,7 @@ import torchvision.transforms.functional as TF
 from utils.misc_utils import resample_to_reference
 import pandas as pd
 from PIL import Image
+from torchvision import transforms as T
 
 class PicaiDataset(Dataset):
 
@@ -172,7 +173,7 @@ class PicaiDataset_png(Dataset):
         hbv_img_path = f"{self.img_dir}/HBV{folder_suf}/{patient_id}_{slice_num}.png"
         adc_img_path = f"{self.img_dir}/ADC{folder_suf}/{patient_id}_{slice_num}.png"
         lesion_mask_path = f"{self.img_dir}/Lesions/{patient_id}_{slice_num}.png"
-
+        
         # Load images and lesion mask using SimpleITK
         t2w_img     = Image.open(t2w_img_path).convert('L')
         hbv_img     = Image.open(hbv_img_path).convert('L')
@@ -197,7 +198,8 @@ class PicaiDataset_png(Dataset):
         lesion_mask = (lesion_mask > 0.5).float()
             
         # Stack the three modalities to create a 3-channel image tensor -> (3, H, W)
-        img = torch.stack([t2w, hbv, adc], dim=0)
+        img = torch.cat([t2w, hbv, adc], dim=0)
+        img = img.squeeze() 
 
         lesion_mask = lesion_mask.unsqueeze(0)  # Add channel dimension to lesion mask -> (1, H, W)
         
