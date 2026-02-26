@@ -55,34 +55,43 @@ class MultimodalPICAINet(nn.Module):
             nn.Linear(16, 1),
         )
         
+        self.single_modal_classifier = nn.Sequential(
+            nn.Linear(self.image_feature_dim, 16),
+            nn.LeakyReLU(1e-1),
+            nn.Dropout(0.2),
+            nn.Linear(16, 1),
+        )
+        
     def forward(self, image, lesion_mask, metadata):
 
         # --- Custom Backbone Stem ---
 
         x = self.custom_backbone(image)
 
-        # Resize mask to match feature map
-        mask_resized = F.interpolate(
-            lesion_mask,
-            size=x.shape[-2:],
-            mode='nearest'
-        )
+        # # Resize mask to match feature map
+        # mask_resized = F.interpolate(
+        #     lesion_mask,
+        #     size=x.shape[-2:],
+        #     mode='nearest'
+        # )
 
-        # Learnable attention
-        attention = self.attn_conv(mask_resized)
+        # # Learnable attention
+        # attention = self.attn_conv(mask_resized)
 
-        # Apply attention
-        x = x * (1 + attention)
+        # # Apply attention
+        # x = x * (1 + attention)
 
         x = self.global_avg_pool(x)
 
         image_features = torch.flatten(x, 1)
 
-        # Metadata branch
-        metadata_embeddings = self.metadata_mlp(metadata)
+        # # Metadata branch
+        # metadata_embeddings = self.metadata_mlp(metadata)
 
-        # Multimodal fusion
-        combined_features = torch.cat([image_features, metadata_embeddings], dim=1)
-        output = self.multimodal_classifier(combined_features).squeeze(1)
+        # # Multimodal fusion
+        # combined_features = torch.cat([image_features, metadata_embeddings], dim=1)
+        # output = self.multimodal_classifier(combined_features).squeeze(1)
 
+        output = self.single_modal_classifier(image_features).squeeze(1)
+        
         return output
