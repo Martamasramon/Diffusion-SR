@@ -293,7 +293,7 @@ class Diffusion(nn.Module):
 
         if self.is_ddim_sampling and perform_uq and num_rep:
 
-            seeds = torch.randint(0, 1e6, (num_rep,), device=self.device)
+            seeds = torch.randint(0, int(1e6), (num_rep,), device=self.device)
             imgs_pred = []
 
             for seed in seeds:

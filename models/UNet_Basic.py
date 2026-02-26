@@ -106,7 +106,7 @@ class UNet_Basic(nn.Module):
         """Return time embedding or None if not used."""
         return self.time_mlp(time) if exists(self.time_mlp) else None
 
-    def forward(self, x_img, low_res, time, x_self_cond=None, t2w=None, control=None):     
+    def forward(self, x_img, low_res, time, x_self_cond=None, t2w=None, hbv=None, control=None):     
         """
         Forward pass:
         - x_img:        high-resolution input image tensor (B, C, H, W)
