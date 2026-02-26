@@ -6,7 +6,7 @@ import torch.nn as nn
 import random
 from torchinfo import summary
 from torch.utils.data import DataLoader
-from utils.dataset import PicaiDataset
+from utils.dataset import PicaiDataset_png
 from utils.trainer import train_model
 from utils.test_validate import val_test_model
 from utils.visualize import plot_training_curves, plot_classification_metrics
@@ -27,7 +27,7 @@ def train(output_dir, timestamp, debug=False):
     batch_size = 32
     random_seed = 13
 
-    metadata_csv_path = '/cluster/project7/backup_masramon/picai_marksheet.csv'
+    metadata_csv_path = '/cluster/project7/backup_masramon/picai_marksheet_filtered.csv'
     # metadata_csv_path = './data/picai_marksheet.csv'
     target_size = (64, 64)
 
@@ -57,25 +57,23 @@ def train(output_dir, timestamp, debug=False):
 
     print("Creating Datasets and DataLoaders...")
     
-    train_dataset = PicaiDataset(
+    input_type = 'HF'  # Options: 'LF', 'HF', 'interpolate', 'outputs'
+    train_dataset = PicaiDataset_png(
         metadata_X_df=train_metadata_X_df,
-        img_dir='./data/',
         labels=train_metadata_y.tolist(),
-        target_size=target_size
+        input_type=input_type
     )
 
-    val_dataset = PicaiDataset(
+    val_dataset = PicaiDataset_png(
         metadata_X_df=val_metadata_X_df,
-        img_dir='./data/',
         labels=val_metadata_y.tolist(),
-        target_size=target_size
+        input_type=input_type
     )
 
-    test_dataset = PicaiDataset(
+    test_dataset = PicaiDataset_png(
         metadata_X_df=test_metadata_X_df,
-        img_dir='./data/',
         labels=test_metadata_y.tolist(),
-        target_size=target_size
+        input_type=input_type
     )
 
     train_loader = DataLoader(
@@ -147,12 +145,29 @@ def train(output_dir, timestamp, debug=False):
     print(f'F1 Score on Validation Set: {val_f1_score}')
 
     print("Loading best model checkpoint for final evaluation on test set...")
+    print("best_checkpoint_path used in train.py:", best_checkpoint_path)
     cs_model.load_state_dict(torch.load(best_checkpoint_path, weights_only=True)['model_state_dict'])
 
     print("Evaluating on test set...")
     test_labels, test_preds, test_loss, test_accuracy, test_class_accuracy = val_test_model('Test', cs_model, test_loader, criterion, device)
     
     test_f1_score = plot_classification_metrics('test', np.array(test_labels), np.array(test_preds), output_dir, timestamp)
+    print(f'F1 Score on Test Set: {test_f1_score}')
+    
+    test_dataset = PicaiDataset_png(metadata_X_df=test_metadata_X_df,labels=test_metadata_y.tolist(),input_type='LF')
+    test_loader  = DataLoader( dataset=test_dataset, batch_size=batch_size, shuffle=False,num_workers=6, pin_memory=True)
+    
+    print("Evaluating on LOW FIELD (0.55T) set...")
+    test_labels, test_preds, test_loss, test_accuracy, test_class_accuracy = val_test_model('Test', cs_model, test_loader, criterion, device)
+    test_f1_score = plot_classification_metrics('test', np.array(test_labels), np.array(test_preds), output_dir, 'lowfield')
+    print(f'F1 Score on Test Set: {test_f1_score}')
+    
+    test_dataset = PicaiDataset_png(metadata_X_df=test_metadata_X_df,labels=test_metadata_y.tolist(),input_type='interpolate')
+    test_loader  = DataLoader( dataset=test_dataset, batch_size=batch_size, shuffle=False,num_workers=6, pin_memory=True)
+    
+    print("Evaluating on (0.55T) interpolated set...")
+    test_labels, test_preds, test_loss, test_accuracy, test_class_accuracy = val_test_model('Test', cs_model, test_loader, criterion, device)
+    test_f1_score = plot_classification_metrics('test', np.array(test_labels), np.array(test_preds), output_dir, 'interpolate')
     print(f'F1 Score on Test Set: {test_f1_score}')
 
 
