@@ -5,6 +5,8 @@ import SimpleITK as sitk
 from torch.utils.data import Dataset
 import torchvision.transforms.functional as TF
 from utils.misc_utils import resample_to_reference
+import pandas as pd
+from PIL import Image
 
 class PicaiDataset(Dataset):
 
@@ -88,6 +90,117 @@ class PicaiDataset(Dataset):
         img = img.squeeze(0)
         lesion_mask = lesion_mask.squeeze(0)
 
+        metadata = img_data[self.metadata_cols].to_numpy().astype(np.float32)
+        metadata = torch.from_numpy(metadata)
+
+        if self.labels is not None:
+            label = self.labels[idx]
+            label = torch.tensor(label, dtype=torch.float32)
+
+            return img, lesion_mask, metadata, label
+        else:
+            return img, lesion_mask, metadata
+        
+        
+
+class Transforms():
+    def __init__(
+        self,
+        adc_size,
+        downsample
+    ):
+        self.adc_size   = adc_size
+        self.downsample = downsample
+    
+    def get_lowres(self):
+        return T.Compose([
+            T.CenterCrop(self.adc_size),
+            T.Resize(self.adc_size//self.downsample, interpolation=T.InterpolationMode.NEAREST),
+            T.Resize(self.adc_size,                  interpolation=T.InterpolationMode.NEAREST),
+            T.Lambda(lambda img: torch.tensor(np.array(img), dtype=torch.float32).unsqueeze(0) / 255) 
+        ])
+    def get_highres(self):
+        return T.Compose([
+            T.CenterCrop(self.adc_size),
+            T.Lambda(lambda img: torch.tensor(np.array(img), dtype=torch.float32).unsqueeze(0) / 255) 
+        ]) 
+    def get_t2w(self):  
+        return T.Compose([
+            T.CenterCrop(self.adc_size*2),
+            T.Resize(self.adc_size, interpolation=T.InterpolationMode.NEAREST),
+            T.ToTensor()
+        ]) 
+    def get_all_transforms(self):
+        return {
+            'ADC':         self.get_highres(),
+            'T2W':         self.get_t2w(),
+            'HBV':         self.get_highres(),
+            'outputs':     self.get_highres(),
+            'interpolate': self.get_lowres(),
+        }
+        
+class PicaiDataset_png(Dataset):
+
+    def __init__(self, metadata_X_df, labels=None, target_size=64, input_type='LF'):
+        self.metadata_X_df = metadata_X_df
+        self.img_dir   =  '/cluster/project7/backup_masramon/IQT/PICAI/'
+        self.label_dir =  '/cluster/project7/backup_masramon/PI-CAI_annotations/lesion_human_original/'
+        self.labels = labels
+        self.target_size = target_size
+        self.input_type  = input_type
+
+        self.metadata_cols = list(set(metadata_X_df.columns) - {'image_name'} - {'patient_id'})
+        self.slice_list    = pd.read_csv('/cluster/project7/backup_masramon/IQT/PICAI/lesion_slices.csv')
+        self.transforms    = Transforms(adc_size=target_size, downsample=2).get_all_transforms()
+        
+    def __len__(self):
+        return len(self.metadata_X_df)
+    
+    def __getitem__(self, idx):
+        img_data = self.metadata_X_df.iloc[idx]
+        patient_id = img_data['patient_id']
+        slice_num  = self.slice_list[self.slice_list['name'] == patient_id]['slice'].values[0]
+        
+        if self.input_type in ['LF', 'interpolate']:
+            folder_suf = "_lowfield"
+        elif self.input_type == 'outputs':
+            folder_suf = "_pred"
+        else:
+            folder_suf = ""
+
+        t2w_img_path = f"{self.img_dir}/T2W{folder_suf}/{patient_id}_{slice_num}.png"
+        hbv_img_path = f"{self.img_dir}/HBV{folder_suf}/{patient_id}_{slice_num}.png"
+        adc_img_path = f"{self.img_dir}/ADC{folder_suf}/{patient_id}_{slice_num}.png"
+        lesion_mask_path = f"{self.img_dir}/Lesions/{patient_id}_{slice_num}.png"
+
+        # Load images and lesion mask using SimpleITK
+        t2w_img     = Image.open(t2w_img_path).convert('L')
+        hbv_img     = Image.open(hbv_img_path).convert('L')
+        adc_img     = Image.open(adc_img_path).convert('L')
+        lesion_mask = Image.open(lesion_mask_path).convert('L')
+
+        # Convert to PyTorch tensors and normalize images
+        if self.input_type == 'LF' or self.input_type == 'HF':
+            t2w         = self.transforms['T2W'](t2w_img)
+            hbv         = self.transforms['HBV'](hbv_img)
+            adc         = self.transforms['ADC'](adc_img)
+        elif self.input_type == 'interpolate':
+            t2w         = self.transforms['interpolate'](t2w_img)
+            hbv         = self.transforms['interpolate'](hbv_img)
+            adc         = self.transforms['interpolate'](adc_img)
+        elif self.input_type == 'outputs':
+            t2w         = self.transforms['outputs'](t2w_img)
+            hbv         = self.transforms['interpolate'](hbv_img)
+            adc         = self.transforms['outputs'](adc_img)
+            
+        lesion_mask = self.transforms['ADC'](lesion_mask)    
+        lesion_mask = (lesion_mask > 0.5).float()
+            
+        # Stack the three modalities to create a 3-channel image tensor -> (3, H, W)
+        img = torch.stack([t2w, hbv, adc], dim=0)
+
+        lesion_mask = lesion_mask.unsqueeze(0)  # Add channel dimension to lesion mask -> (1, H, W)
+        
         metadata = img_data[self.metadata_cols].to_numpy().astype(np.float32)
         metadata = torch.from_numpy(metadata)
 
