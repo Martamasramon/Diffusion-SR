@@ -164,13 +164,16 @@ class PicaiDataset_png(Dataset):
         
         if self.input_type in ['LF', 'interpolate']:
             folder_suf = "_lowfield"
+            hbv_suf = ""
         elif self.input_type == 'outputs':
             folder_suf = "_pred"
+            hbv_suf = ""
         else:
             folder_suf = ""
+            hbv_suf = ""
 
         t2w_img_path = f"{self.img_dir}/T2W{folder_suf}/{patient_id}_{slice_num}.png"
-        hbv_img_path = f"{self.img_dir}/HBV{folder_suf}/{patient_id}_{slice_num}.png"
+        hbv_img_path = f"{self.img_dir}/HBV{hbv_suf}/{patient_id}_{slice_num}.png"
         adc_img_path = f"{self.img_dir}/ADC{folder_suf}/{patient_id}_{slice_num}.png"
         lesion_mask_path = f"{self.img_dir}/Lesions/{patient_id}_{slice_num}.png"
         
@@ -187,11 +190,11 @@ class PicaiDataset_png(Dataset):
             adc         = self.transforms['ADC'](adc_img)
         elif self.input_type == 'interpolate':
             t2w         = self.transforms['interpolate'](t2w_img)
-            hbv         = self.transforms['interpolate'](hbv_img)
+            hbv         = self.transforms['HBV'](hbv_img)
             adc         = self.transforms['interpolate'](adc_img)
         elif self.input_type == 'outputs':
             t2w         = self.transforms['outputs'](t2w_img)
-            hbv         = self.transforms['interpolate'](hbv_img)
+            hbv         = self.transforms['HBV'](hbv_img)
             adc         = self.transforms['outputs'](adc_img)
             
         lesion_mask = self.transforms['ADC'](lesion_mask)    

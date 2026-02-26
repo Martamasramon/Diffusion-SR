@@ -157,7 +157,7 @@ def train(output_dir, timestamp, debug=False):
     test_dataset = PicaiDataset_png(metadata_X_df=test_metadata_X_df,labels=test_metadata_y.tolist(),input_type='LF')
     test_loader  = DataLoader( dataset=test_dataset, batch_size=batch_size, shuffle=False,num_workers=6, pin_memory=True)
     
-    print("Evaluating on LOW FIELD (0.55T) set...")
+    print("Evaluating on LOW FIELD (0.55T) images...")
     test_labels, test_preds, test_loss, test_accuracy, test_class_accuracy = val_test_model('Test', cs_model, test_loader, criterion, device)
     test_f1_score = plot_classification_metrics('test', np.array(test_labels), np.array(test_preds), output_dir, 'lowfield')
     print(f'F1 Score on Test Set: {test_f1_score}')
@@ -165,9 +165,17 @@ def train(output_dir, timestamp, debug=False):
     test_dataset = PicaiDataset_png(metadata_X_df=test_metadata_X_df,labels=test_metadata_y.tolist(),input_type='interpolate')
     test_loader  = DataLoader( dataset=test_dataset, batch_size=batch_size, shuffle=False,num_workers=6, pin_memory=True)
     
-    print("Evaluating on (0.55T) interpolated set...")
+    print("Evaluating on (0.55T) interpolated images...")
     test_labels, test_preds, test_loss, test_accuracy, test_class_accuracy = val_test_model('Test', cs_model, test_loader, criterion, device)
     test_f1_score = plot_classification_metrics('test', np.array(test_labels), np.array(test_preds), output_dir, 'interpolate')
+    print(f'F1 Score on Test Set: {test_f1_score}')
+    
+    test_dataset = PicaiDataset_png(metadata_X_df=test_metadata_X_df,labels=test_metadata_y.tolist(),input_type='outputs')
+    test_loader  = DataLoader( dataset=test_dataset, batch_size=batch_size, shuffle=False,num_workers=6, pin_memory=True)
+    
+    print("Evaluating on SR outputs...")
+    test_labels, test_preds, test_loss, test_accuracy, test_class_accuracy = val_test_model('Test', cs_model, test_loader, criterion, device)
+    test_f1_score = plot_classification_metrics('test', np.array(test_labels), np.array(test_preds), output_dir, 'outputs')
     print(f'F1 Score on Test Set: {test_f1_score}')
 
 
